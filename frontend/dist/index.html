@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NSE Relative Strength</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=5">
+</head>
+<body>
+<div class="app-shell">
+  <header class="app-header">
+    <div>
+      <h1>NSE Relative Strength</h1>
+      <p class="meta">
+        Equal‑weight group indexes vs NIFTY 500 · 26‑day window
+        · <em id="meta-drange">—</em>
+      </p>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="btn" id="btn-update" title="Fetch latest prices from Yahoo and update RS rankings">
+        Update Prices
+      </button>
+      <button class="btn" id="btn-refresh-stocks" title="Check for new NSE listings and fetch their classifications">
+        Refresh Stocks
+      </button>
+      <button class="theme-toggle" id="theme-toggle" title="Toggle theme">
+        <span class="icon">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="stat-row" id="stat-row">
+    <div class="stat-card">
+      <div class="stat-label">Market Breadth</div>
+      <div class="stat-val" id="stat-breadth">—</div>
+      <div class="stat-sub" id="stat-breadth-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Stocks Tracked</div>
+      <div class="stat-val" id="stat-stocks">—</div>
+      <div class="stat-sub" id="stat-stocks-sub">across 4 classification levels</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Groups</div>
+      <div class="stat-val" id="stat-groups">—</div>
+      <div class="stat-sub" id="stat-groups-sub"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Last Updated</div>
+      <div class="stat-val" id="stat-gen" style="font-size:14px">—</div>
+      <div class="stat-sub" id="stat-gen-sub"></div>
+    </div>
+  </div>
+
+  <nav class="tab-bar" id="tab-bar">
+    <!-- Populated by JS -->
+  </nav>
+
+  <div class="toolbar-section" id="toolbar-section">
+    <div class="search-row">
+      <input class="search-input" id="search-input" type="search"
+             placeholder="Search by stock name, symbol, sector or industry…" autocomplete="off">
+      <span class="search-info" id="search-info"></span>
+    </div>
+    <div class="filter-row" id="filter-row">
+      <span class="filter-label">Price above</span>
+      <button class="ema-tog" data-ema="0">20</button>
+      <button class="ema-tog" data-ema="1">50</button>
+      <button class="ema-tog" data-ema="2">100</button>
+      <button class="ema-tog" data-ema="3">150</button>
+      <button class="ema-tog" data-ema="4">200</button>
+      <span style="color:var(--text-muted);font-size:11px">EMA</span>
+      <button class="ema-tog clear" id="ema-clear">clear</button>
+      <label class="filter-chip hi" id="hi-chip">
+        <input type="checkbox" id="hi-on"> ≤<input type="number" id="hi-max" value="20" min="0" max="100" step="1">% off high
+      </label>
+      <label class="filter-chip adr" id="adr-chip">
+        <input type="checkbox" id="adr-on"> ADR ≥<input type="number" id="adr-min" value="3" min="0" max="50" step="0.5">%
+      </label>
+      <label class="filter-chip rs" id="rs-chip">
+        <input type="checkbox" id="rs-on"> RS ≥<input type="number" id="rs-min" value="80" min="0" max="100" step="5">%
+      </label>
+      <label class="filter-chip rse" id="rse-chip">
+        <input type="checkbox" id="rse-on"> RS above EMA21
+      </label>
+      <span class="filter-info" id="filter-info"></span>
+    </div>
+    <div class="sel-row" id="sel-row">
+      <span class="sel-count" id="sel-count">0 selected</span>
+      <button class="btn" id="sel-vis">Select all shown</button>
+      <button class="btn" id="sel-clear">Clear</button>
+      <button class="btn primary" id="btn-copy">Copy for TradingView</button>
+      <button class="btn primary" id="btn-dl">Download .txt</button>
+      <span class="flash-msg" id="flash"></span>
+    </div>
+  </div>
+
+  <div class="content" id="content"></div>
+  <p class="note" id="note">
+    RS_STS% = percentile rank of the relative‑strength ratio within its 26‑day window.
+    Stocks without a close every window day (suspensions, halts, new listings) are
+    excluded from the view. Click a group to expand its stocks; click a column header to sort.
+  </p>
+</div>
+<script src="app.js?v=5"></script>
+</body>
+</html>
