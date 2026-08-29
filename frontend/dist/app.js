@@ -560,7 +560,14 @@
       tip.innerHTML = `<b>${fmt(dates[i])}</b><span>${val >= 0 ? '+' : ''}${val.toFixed(1)}</span>`;
       tip.style.visibility = 'visible';
       const cx = (e.clientX - scroll.getBoundingClientRect().left) + scroll.scrollLeft;
-      tip.style.left = cx + 'px';
+      // Clamp the tooltip inside the VISIBLE area — at the chart's right edge
+      // (latest point) it used to overflow and stretch the horizontal scroll.
+      const tipW = tip.offsetWidth;
+      const scW = scroll.clientWidth;
+      let left = (cx - scroll.scrollLeft) - tipW / 2;
+      if (left < 2) left = 2;
+      if (left > scW - tipW - 2) left = scW - tipW - 2;
+      tip.style.left = (scroll.scrollLeft + left) + 'px';
       tip.style.top = (py * (r.height / H) - 34) + 'px';
     });
 

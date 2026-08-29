@@ -156,6 +156,79 @@ def test_yahoo_closes_null_highlow_falls_back_to_close(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+#  2b. Intraday repair (Yahoo null-daily-bar gaps: Aug 28, Jul 28 patterns)
+# --------------------------------------------------------------------------- #
+from build_rs import intraday_day, repair_intraday_gap
+
+
+def _intraday_payload(times):
+    """5m-bar payload for `times`: list of (y, m, d, hour, min, close)."""
+    ts, cl, hg, lw = [], [], [], []
+    for y, mo, d, h, mi, c in times:
+        ts.append(int(dt.datetime(y, mo, d, h, mi, tzinfo=IST).timestamp()))
+        cl.append(c)
+        hg.append(c + 1.0)
+        lw.append(c - 1.0)
+    return {"chart": {"result": [{
+        "timestamp": ts,
+        "indicators": {"quote": [{"close": cl, "high": hg, "low": lw}]},
+    }]}}
+
+
+def test_intraday_day_extracts_close_high_low(monkeypatch):
+    times = [
+        (2026, 8, 28, 9, 15, 100.0),
+        (2026, 8, 28, 15, 25, 103.5),       # last bar of the day
+        (2026, 8, 29, 9, 15, 104.0),        # next day must NOT leak in
+    ]
+    patch_session(monkeypatch, FakeSession(FakeResp(200, payload=_intraday_payload(times))))
+    assert intraday_day("RELIANCE.NS", "2026-08-28") == (103.5, 104.5, 99.0)
+
+
+def test_intraday_day_returns_none_when_day_absent(monkeypatch):
+    times = [(2026, 8, 27, 9, 15, 100.0)]
+    patch_session(monkeypatch, FakeSession(FakeResp(200, payload=_intraday_payload(times))))
+    assert intraday_day("X.NS", "2026-08-28") is None
+
+
+def test_repair_intraday_gap_fills_missing_day(monkeypatch, tmp_path):
+    # NEVER let the repair persist into the real caches during tests
+    monkeypatch.setattr(build_rs, "PRICE_CACHE", str(tmp_path / "price.json"))
+    monkeypatch.setattr(build_rs, "HIGH_CACHE", str(tmp_path / "high.json"))
+    monkeypatch.setattr(build_rs, "LOW_CACHE", str(tmp_path / "low.json"))
+    cache = {"__BENCH__": {"2026-08-27": 20000.0},
+             "AAA": {"2026-08-27": 100.0}, "BBB": {"2026-08-27": 50.0}}
+    highs, lows = {}, {}
+
+    def fake_intraday(ysym, day):
+        if day != "2026-08-28":
+            return None
+        return {"AAA.NS": (101.0, 102.0, 99.0),
+                "BBB.NS": (51.0, 52.0, 49.0),
+                "^CRSLDX": (20100.0, 20150.0, 19950.0)}.get(ysym)
+
+    monkeypatch.setattr(build_rs, "intraday_day", fake_intraday)
+    monkeypatch.setattr(build_rs, "YH_WORKERS", 1)
+    repaired = repair_intraday_gap(cache, highs, lows, ["AAA", "BBB"], thresh=1,
+                                   today=dt.date(2026, 8, 29))
+    assert repaired == ["2026-08-28"]
+    assert cache["AAA"]["2026-08-28"] == 101.0
+    assert cache["BBB"]["2026-08-28"] == 51.0
+    assert cache["__BENCH__"]["2026-08-28"] == 20100.0
+    assert highs["AAA"]["2026-08-28"] == 102.0
+    assert lows["AAA"]["2026-08-28"] == 99.0
+
+
+def test_repair_intraday_gap_skips_holiday(monkeypatch):
+    cache = {"__BENCH__": {"2026-08-27": 20000.0}, "AAA": {"2026-08-27": 100.0}}
+    # no intraday bars anywhere for the gap day (holiday) -> nothing filled
+    monkeypatch.setattr(build_rs, "intraday_day", lambda ysym, day: None)
+    assert repair_intraday_gap(cache, {}, {}, ["AAA"], thresh=1,
+                               today=dt.date(2026, 8, 29)) == []
+    assert "2026-08-28" not in cache["AAA"]
+
+
+# --------------------------------------------------------------------------- #
 #  3. Benchmark gap-fill chain
 # --------------------------------------------------------------------------- #
 def _stock_cache(n, dates, start=100.0, step=1.0):
@@ -228,6 +301,28 @@ def test_fill_nothing_missing_does_not_scrape(monkeypatch):
     bench = {"2026-07-27": 1.0, "2026-07-28": 1.1}
     have, cache = _stock_cache(120, ["2026-07-27", "2026-07-28"])
     assert fill_benchmark_gaps(bench, cache, have, thresh=100) == []
+
+
+def test_fill_skips_fake_flat_holiday_bars():
+    """Yahoo's flat duplicate bars on holidays (100% of closes equal the
+    previous day) must never be filled into the benchmark — they're not
+    trading days."""
+    from build_rs import is_fake_flat_day
+    have, cache = _stock_cache(150, ["2026-06-25", "2026-06-26"])   # real days
+    # add a "holiday": every stock's 06-27 bar equals its 06-26 close
+    for s in have:
+        cache[s]["2026-06-27"] = cache[s]["2026-06-26"]
+    assert is_fake_flat_day(cache, have, "2026-06-27") is True
+    bench = {"2026-06-26": 1000.0}
+    assert fill_benchmark_gaps(bench, cache, have, thresh=100, inv={}) == []
+    assert "2026-06-27" not in bench
+
+
+def test_is_fake_flat_day_real_day_moves(monkeypatch):
+    from build_rs import is_fake_flat_day
+    # a real day: nearly all closes differ from the previous close
+    have, cache = _stock_cache(150, ["2026-06-25", "2026-06-26"], step=1.0)
+    assert is_fake_flat_day(cache, have, "2026-06-26") is False
 
 
 def test_fill_chains_multiple_missing_days_from_last_known():

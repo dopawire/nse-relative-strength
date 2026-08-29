@@ -198,6 +198,44 @@ def yahoo_closes(ysym, rng):
     return None, None, None, "rate-limited"
 
 
+INTRA_URL = ("https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+             "?range=5d&interval=5m")
+
+
+def intraday_day(ysym, day):
+    """Return (close, high, low) for `day` (ISO) from Yahoo 5-minute bars, or
+    None.  Used to repair days whose DAILY bar is null while intraday bars
+    exist (Yahoo's recurring gap pattern — Aug 28 2026, Jul 28 2026, ...).
+    close = last bar of the day; high/low = intraday extremes (exact)."""
+    try:
+        r = _session().get(INTRA_URL.format(sym=requests.utils.quote(ysym)),
+                           timeout=25)
+        if r.status_code != 200:
+            return None
+        res = (r.json().get("chart") or {}).get("result")
+        if not res:
+            return None
+        res = res[0]
+        ts = res.get("timestamp") or []
+        quote = ((res.get("indicators") or {}).get("quote") or [{}])[0]
+        cl, hg, lw = (quote.get("close") or [], quote.get("high") or [],
+                      quote.get("low") or [])
+    except (requests.RequestException, ValueError, KeyError):
+        return None
+    bars = []
+    for i, t in enumerate(ts):
+        d = dt.datetime.fromtimestamp(int(t), IST).strftime("%Y-%m-%d")
+        if d == day and i < len(cl) and cl[i] is not None:
+            bars.append((cl[i],
+                         hg[i] if i < len(hg) and hg[i] is not None else cl[i],
+                         lw[i] if i < len(lw) and lw[i] is not None else cl[i]))
+    if not bars:
+        return None
+    return (bars[-1][0],
+            max(b[1] for b in bars),
+            min(b[2] for b in bars))
+
+
 def fetch_prices(universe, cache, highs, lows, fast=False):
     """Fetch daily closes + intraday highs/lows for every symbol + benchmark into
     `cache` ({sym:{date:close}}), `highs` and `lows`, benchmark under '__BENCH__'.
@@ -251,6 +289,70 @@ def fetch_prices(universe, cache, highs, lows, fast=False):
                 flush()
     flush()
     return ok, miss
+
+
+def repair_intraday_gap(cache, highs, lows, have, thresh, today=None):
+    """Yahoo occasionally serves null DAILY bars for sessions the market was
+    open, while its intraday bars exist (Aug 28 2026 — whole market; Jul 28 —
+    indices only).  For each candidate weekday that lacks broad stock coverage
+    (strictly PAST days — never a session in progress), fill every missing
+    symbol from its 5m bars.  Also self-heals bogus benchmark bars: if the
+    cached bench close deviates >1% from the index's intraday close, replace
+    it.  Returns the list of repaired dates."""
+    if today is None:
+        today = dt.datetime.now(IST).date()
+    bench = cache.get("__BENCH__", {})
+    if not bench:
+        return []
+    # Candidates: weekdays after the last bench date, plus recent bench dates
+    # whose stock coverage is thin (a stale/wrong bench bar must not silently
+    # hide a gap).
+    candidates = []
+    d = dt.date.fromisoformat(max(bench)) + dt.timedelta(days=1)
+    while d < today:
+        if d.weekday() < 5:
+            candidates.append(d.isoformat())
+        d += dt.timedelta(days=1)
+    for day in sorted(bench)[-7:]:
+        if day not in candidates:
+            candidates.append(day)
+    repaired = []
+    for day in candidates:
+        if not (dt.date.fromisoformat(day) < today):
+            continue                       # never a session in progress
+        cov = sum(1 for s in have if day in cache.get(s, {}))
+        bench_missing = day not in bench
+        if cov >= thresh and not bench_missing:
+            continue                       # healthy day — nothing to do
+        probe = (intraday_day(BENCH_YSYM, day)
+                 or (intraday_day(have[0] + ".NS", day) if have else None))
+        if probe is None:
+            continue                       # holiday, or no intraday bars at all
+        i_close = probe[0]
+        jobs = []
+        if bench_missing or abs(bench[day] / i_close - 1) > 0.01:
+            jobs.append(("__BENCH__", BENCH_YSYM))
+        jobs += [(s, s + ".NS") for s in have if day not in cache.get(s, {})]
+        filled = 0
+        with cf.ThreadPoolExecutor(max_workers=YH_WORKERS) as ex:
+            for key, ysym in jobs:
+                bar = intraday_day(ysym, day)
+                if not bar:
+                    continue
+                c, h, l = bar
+                cache.setdefault(key, {})[day] = c
+                highs.setdefault(key, {})[day] = h
+                lows.setdefault(key, {})[day] = l
+                filled += 1
+        if filled:
+            repaired.append(day)
+            print(f"Repaired {day} from intraday bars: {filled} symbols "
+                  f"(Yahoo daily bars were null).")
+    if repaired:
+        write_json_atomic(PRICE_CACHE, cache)
+        write_json_atomic(HIGH_CACHE, highs)
+        write_json_atomic(LOW_CACHE, lows)
+    return repaired
 
 
 # --------------------------------------------------------------------------- #
@@ -320,6 +422,27 @@ def _scrape_investing_com():
     return out if out else None
 
 
+def is_fake_flat_day(cache, have, day, sample=300):
+    """Yahoo sometimes emits flat duplicate bars on NSE holidays (100% of stock
+    bars equal the previous close) and stale carries on pipeline-outage days.
+    Real trading days virtually never have >90% flat closes.  Returns True when
+    the day looks fake — such dates must never be filled into the benchmark."""
+    flat = moved = 0
+    for s in have[:sample]:
+        ser = cache.get(s, {})
+        if day not in ser:
+            continue
+        prevs = [d for d in ser if d < day]
+        if not prevs:
+            continue
+        if ser[day] == ser[prevs[-1]]:
+            flat += 1
+        else:
+            moved += 1
+    total = flat + moved
+    return total >= 100 and flat / total > 0.9
+
+
 def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
     """Fill benchmark days that Yahoo missed (index symbols occasionally publish
     null OHLC while individual stocks publish fine).  Fallback chain per missing
@@ -331,8 +454,15 @@ def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
     all_dates = set()
     for s in have:
         all_dates.update(cache[s].keys())
+    # Only fill RECENT gaps: the index-gap incidents (Jul 28, Aug 28) are
+    # last-day events.  Old dates missing from the benchmark are mostly NSE
+    # holidays that Yahoo wrongly gave bars to for many stocks — filling those
+    # would inject fake trading days into the benchmark/breadth history.
+    cutoff = dt.date.fromisoformat(max(bench_dates)) - dt.timedelta(days=45)
     missing = sorted(d for d in all_dates if d not in bench_dates
-                     if sum(1 for s in have if d in cache[s]) >= thresh)
+                     if d >= cutoff.isoformat()
+                     if sum(1 for s in have if d in cache[s]) >= thresh
+                     if not is_fake_flat_day(cache, have, d))
     if not missing:
         return []
     if inv is None:
@@ -1361,11 +1491,17 @@ def main():
     if not bench:
         sys.exit("No benchmark data in cache. Run a full fetch (drop --html-only).")
 
+    have = [u["sym"] for u in universe if cache.get(u["sym"])]
+    thresh = max(1, int(0.5 * len(have)))
+
+    # Repair null daily bars from intraday (Yahoo gap pattern) — fetch-based
+    # runs only; --html-only must stay offline.
+    if not args.html_only:
+        repair_intraday_gap(cache, highs, lows, have, thresh)
+
     # Reference window = last WINDOW benchmark dates that ALSO have broad stock
     # coverage, so a benchmark day that leads the stock cache can't null out RS.
     bench_dates = sorted(bench.keys())
-    have = [u["sym"] for u in universe if cache.get(u["sym"])]
-    thresh = max(1, int(0.5 * len(have)))
 
     # Fill benchmark gaps.  Yahoo occasionally misses a day for index symbols
     # (^CRSLDX, ^NSEI, etc.) while publishing individual stocks.
