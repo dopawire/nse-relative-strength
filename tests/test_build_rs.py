@@ -264,6 +264,27 @@ def test_percentrank_inc_ignores_nones():
 
 
 # --------------------------------------------------------------------------- #
+#  4a. Cache durability (the Aug 29 corruption incident: two concurrent builds
+#  interleaved writes and left a cache half-garbage; the build must survive)
+# --------------------------------------------------------------------------- #
+def test_write_json_atomic_leaves_no_tmp(tmp_path):
+    p = tmp_path / "c.json"
+    build_rs.write_json_atomic(str(p), {"a": 1})
+    assert json.loads(p.read_text()) == {"a": 1}
+    assert not (tmp_path / "c.json.tmp").exists()
+
+
+def test_load_json_cache_survives_corruption(tmp_path):
+    p = tmp_path / "c.json"
+    p.write_text('{"a": 1, "corrupt')
+    assert build_rs.load_json_cache(str(p)) == {}          # warns, returns fresh
+
+
+def test_load_json_cache_missing_file(tmp_path):
+    assert build_rs.load_json_cache(str(tmp_path / "nope.json")) == {}
+
+
+# --------------------------------------------------------------------------- #
 #  4b. RS line vs EMA21 (TradingView-style ratio = stock / benchmark)
 # --------------------------------------------------------------------------- #
 from build_rs import rs_ema_flag

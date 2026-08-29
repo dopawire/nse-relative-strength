@@ -17,3 +17,4 @@ run.log
 .env
 .claude/
 .DS_Store
+.build.lock

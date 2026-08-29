@@ -124,6 +124,29 @@ def read_universe():
 _tls = threading.local()
 
 
+def write_json_atomic(path, obj):
+    """Write JSON via tmp + os.replace so a crash mid-write (kill, power loss,
+    disk hiccup) can never leave a truncated/corrupt cache behind."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(obj, fh)
+    os.replace(tmp, path)
+
+
+def load_json_cache(path):
+    """Load a JSON cache, surviving corruption: warn + return {} instead of
+    crashing the whole build. The affected data is refetched on the next run."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"WARNING: {path} is corrupt ({type(e).__name__}) — starting that "
+              f"cache fresh; its data will be refetched.")
+        return {}
+
+
 def _session():
     """One requests.Session per worker thread (keep-alive, thread-safe)."""
     s = getattr(_tls, "s", None)
@@ -209,8 +232,7 @@ def fetch_prices(universe, cache, highs, lows, fast=False):
 
     def flush():
         for path, obj in ((PRICE_CACHE, cache), (HIGH_CACHE, highs), (LOW_CACHE, lows)):
-            with open(path, "w") as fh:
-                json.dump(obj, fh)
+            write_json_atomic(path, obj)
 
     with cf.ThreadPoolExecutor(max_workers=YH_WORKERS) as ex:
         for key, data, hi, lo, err in ex.map(work, jobs):
@@ -1292,6 +1314,19 @@ def main():
                          "data un-revalidated and drifts the breadth oscillator")
     args = ap.parse_args()
 
+    # One build at a time: run_daily.sh in a terminal + the website's Update
+    # Prices button both write the caches — concurrent runs interleave JSON
+    # writes and corrupt them. flock is released automatically on exit.
+    try:
+        import fcntl
+        _lock_fh = open(os.path.join(HERE, ".build.lock"), "w")
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        sys.exit("Another build is already running (website button / terminal?). "
+                 "Wait for it to finish and retry.")
+    except ImportError:
+        pass   # non-POSIX platform — skip the lock
+
     universe = read_universe()
     if args.limit:
         universe = universe[:args.limit]
@@ -1301,17 +1336,9 @@ def main():
           f"{len({u['basic'] for u in universe if u['basic']})} basic industries.")
 
     # ---- price cache (keyed by NSE symbol; benchmark under '__BENCH__') ----
-    cache = {}
-    if os.path.exists(PRICE_CACHE):
-        with open(PRICE_CACHE) as fh:
-            cache = json.load(fh)
-    highs, lows = {}, {}
-    if os.path.exists(HIGH_CACHE):
-        with open(HIGH_CACHE) as fh:
-            highs = json.load(fh)
-    if os.path.exists(LOW_CACHE):
-        with open(LOW_CACHE) as fh:
-            lows = json.load(fh)
+    cache = load_json_cache(PRICE_CACHE)
+    highs = load_json_cache(HIGH_CACHE)
+    lows = load_json_cache(LOW_CACHE)
 
     if not args.html_only:
         if args.fast:
@@ -1348,8 +1375,7 @@ def main():
         print(f"Filled {len(_filled)} missing benchmark date(s): "
               + ", ".join(f"{d} via {m}" for d, m in _filled))
         # Persist so fills survive future --html-only runs
-        with open(PRICE_CACHE, "w") as fh:
-            json.dump(cache, fh)
+        write_json_atomic(PRICE_CACHE, cache)
     covered = [d for d in bench_dates
                if sum(1 for s in have if d in cache[s]) >= thresh]
     ref_dates = (covered or bench_dates)[-WINDOW:]
