@@ -17,7 +17,9 @@ with:
   **RS line vs its 21-day EMA** (above/below), % off 52-week high, ADR%.
 - Filters: search, price-above-EMA, %-off-high, ADR, **RS ≥ N%**, **RS above
   EMA21** — combined with a TradingView watchlist export.
-- **Market Breadth** oscillator (advancers − decliners, RANA-based).
+- **Market Breadth** oscillator (advancers − decliners, RANA-based), plus a
+  **per-macro breadth dashboard** — the same oscillator computed for each of
+  the 12 macro groups as a card grid with hover tooltips and RS% badges.
 
 ## Method
 
@@ -41,6 +43,10 @@ with:
   traded fine — such benchmark gaps are filled from **Investing.com** (real
   index close), with an equal-weight synthetic from stock returns as last
   resort.
+- When Yahoo's **daily bars are null but intraday bars exist** (whole-market
+  gaps like Aug 28, 2026), the build repairs the missing day from 5-minute
+  bars automatically. Flat duplicate bars (Yahoo's holiday artifacts) are
+  detected and never enter the benchmark.
 
 ## Scripts
 
