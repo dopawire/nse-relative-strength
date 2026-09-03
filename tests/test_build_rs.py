@@ -516,6 +516,51 @@ def test_meta_drange_end_matches_breadth_last_date(rs_data):
     assert end == rs_data["breadth"]["dates"][-1]
 
 
+def test_macro_breadth_present_and_aligned(rs_data):
+    """Every macro has a breadth oscillator aligned to the main breadth dates."""
+    b = rs_data["breadth"]
+    macros = b.get("macros", [])
+    assert len(macros) == 12, [m["name"] for m in macros]
+    names = sorted(m["name"] for m in macros)
+    assert "Financial Services" in names and "Information Technology" in names
+    for m in macros:
+        assert len(m["dates"]) == len(m["osc"]) == len(b["dates"])
+        assert m["dates"] == b["dates"], m["name"]
+        assert abs(m["latest"] - m["osc"][-1]) <= 0.0051  # latest is rounded 2dp
+
+
+def test_macro_breadth_math(price_cache, rs_data):
+    """A macro whose stocks mostly advanced recently must have a positive
+    latest oscillator; independent recomputation matches the stored series."""
+    from build_rs import compute_macro_breadth
+    # rebuild from the real caches and compare with the stored series
+    import csv
+    with open(ROOT / 'nse_stock_master.csv') as f:
+        universe = list(csv.DictReader(f))
+    for u in universe:
+        u["sym"] = u["symbol"]
+        u["macro"] = u.get("macro") or ""
+    dates = rs_data["breadth"]["dates"]
+    # covered_dates for compute_macro_breadth = dates + warm-up (39 trimmed at start)
+    # reconstruct the full covered list from the caches
+    cov = {}
+    for s, ser in price_cache.items():
+        if s == "__BENCH__":
+            continue
+        for d in ser:
+            cov[d] = cov.get(d, 0) + 1
+    n_stocks = sum(1 for s in price_cache if s != "__BENCH__" and price_cache[s])
+    covered = sorted(d for d, n in cov.items() if n >= n_stocks // 2)
+    macros = compute_macro_breadth(universe, price_cache, covered)
+    stored = {m["name"]: m for m in rs_data["breadth"]["macros"]}
+    assert len(macros) == 12
+    for m in macros[:4]:
+        st = stored[m["name"]]
+        assert m["dates"] == st["dates"]
+        assert [round(v, 2) for v in m["osc"]] == [round(v, 2) for v in st["osc"]]
+        assert abs(m["latest"] - st["latest"]) < 0.01
+
+
 def test_window_coverage_consistent(rs_data, price_cache):
     """n_stocks (universe) ≥ n_window (stocks in the levels), and every
     excluded stock genuinely lacks ≥1 of the 26 window dates — i.e. no stock

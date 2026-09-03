@@ -700,6 +700,59 @@ def compute_breadth(universe, cache, covered_dates):
     return rdates[warm:], osc[warm:], len(series)
 
 
+def compute_macro_breadth(universe, cache, covered_dates):
+    """The same McClellan-style oscillator, computed per MACRO group — the
+    Market Breadth page shows all 12 as a dashboard grid.  Shares the main
+    breadth's covered_dates so every chart is aligned.  Returns a list of
+    {"name", "dates", "osc", "latest"} sorted by name (macros with ≥ 5
+    stocks; the warm-up trim matches compute_breadth)."""
+    by_macro = defaultdict(list)
+    for u in universe:
+        ser = cache.get(u["sym"])
+        if ser and u.get("macro"):
+            by_macro[u["macro"]].append(ser)
+
+    def ema(vals, span):
+        k = 2.0 / (span + 1)
+        out, e = [], vals[0]
+        for v in vals:
+            e = v * k + e * (1 - k)
+            out.append(e)
+        return out
+
+    out = []
+    for name, series in sorted(by_macro.items()):
+        if len(series) < 5:
+            continue
+        rana, rdates = [], []
+        for i in range(1, len(covered_dates)):
+            prev, cur = covered_dates[i - 1], covered_dates[i]
+            adv = dec = 0
+            for s in series:
+                a = s.get(prev)
+                b = s.get(cur)
+                if a is None or b is None:
+                    continue
+                if b > a:
+                    adv += 1
+                elif b < a:
+                    dec += 1
+            if adv + dec == 0:
+                continue
+            rana.append((adv - dec) / (adv + dec) * 1000.0)
+            rdates.append(cur)
+        if len(rana) < 2:
+            continue
+        e19, e39 = ema(rana, 19), ema(rana, 39)
+        osc = [a - b for a, b in zip(e19, e39)]
+        warm = min(39, max(0, len(osc) // 4))
+        if len(osc) - warm < 10:
+            continue
+        out.append({"name": name, "dates": rdates[warm:], "osc": osc[warm:],
+                    "latest": round(osc[-1], 2)})
+    return out
+
+
 def render_breadth_svg(dates, osc, n_stocks):
     if not osc or len(osc) < 2:
         return ('<div class="brdempty">Not enough price history cached for the breadth '
@@ -1589,10 +1642,12 @@ def main():
     breadth = None
     try:
         bdates, bosc, bn = compute_breadth(universe, cache, breadth_dates)
-        breadth = {"dates": bdates, "osc": bosc, "n": bn}
+        macros = compute_macro_breadth(universe, cache, breadth_dates)
+        breadth = {"dates": bdates, "osc": bosc, "n": bn, "macros": macros}
         if bosc:
             print(f"Breadth oscillator: {len(bosc)} days "
-                  f"({bdates[0]} → {bdates[-1]}), latest {bosc[-1]:+.1f}")
+                  f"({bdates[0]} → {bdates[-1]}), latest {bosc[-1]:+.1f} "
+                  f"({len(macros)} macro charts)")
         else:
             print("Breadth oscillator: not enough history (run --refresh for more).")
     except Exception as e:

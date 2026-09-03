@@ -142,6 +142,7 @@ def get_breadth():
         "n": brd.get("n", 0),
         "latest": osc[-1] if osc else 0.0,
         "span": f"{dates[0]} → {dates[-1]}" if dates else "",
+        "macros": brd.get("macros", []),
     }
 
 

@@ -412,14 +412,24 @@
         $.content.innerHTML = '<div class="brd-empty">Not enough history. Run <code>python3 build_rs.py --refresh</code>.</div>';
         return;
       }
-      $.content.innerHTML = buildBreadthHTML(data);
+      // macro RS_STS% badges come from the macro level (lazy-fetched once)
+      let pctMap = {};
+      if (data.macros && data.macros.length && !state.levelData.macro) {
+        try { state.levelData.macro = await api.level('macro'); } catch (e) { /* badges optional */ }
+      }
+      const ml = state.levelData.macro;
+      if (ml && ml.groups) {
+        for (const g of ml.groups) pctMap[g.name] = g.pct;
+      }
+      $.content.innerHTML = buildBreadthHTML(data, pctMap);
       bindBreadthEvents(data);
+      bindMacroEvents(data);
     } catch (e) {
       $.content.innerHTML = `<div class="brd-empty">Failed to load breadth data: ${e.message}</div>`;
     }
   }
 
-  function buildBreadthHTML(data) {
+  function buildBreadthHTML(data, pctMap = {}) {
     const { dates, osc, n, latest, span } = data;
     if (!osc || osc.length < 2) {
       return '<div class="brd-empty">Not enough price history. Run <code>python3 build_rs.py --refresh</code>.</div>';
@@ -515,7 +525,111 @@
       </div>
       <div class="brd-cap">Latest reading <b>${latest >= 0 ? '+' : ''}${latest.toFixed(1)}</b>. Extreme lows (≈ −40 and below) flag oversold / possible bottoms; extreme highs (≈ +40 and above) flag overbought — reversal warnings.</div>
       <blockquote class="brd-q">Zanger: "I use one custom oscillator in particular which uses market breadth advance-decline data to give me a heads up on trend strength and potential reversals. When it hits extreme lows or highs, it usually means a reversal of some sort is ahead."</blockquote>
+    </div>
+    ${macroBreadthSection(data, pctMap)}`;
+  }
+
+  // ---- Macro breadth dashboard (12 small oscillator charts) ----
+  function macroBreadthSection(data, pctMap) {
+    const macros = data.macros || [];
+    if (!macros.length) return '';
+    const cards = macros.map((m, i) => macroCardHTML(m, i, pctMap)).join('');
+    return `<div class="mbrd-head">Macro breadth — ${macros.length} macros
+      <span> · same oscillator (19- vs 39-day EMA of RANA) per macro group · hover for values</span></div>
+      <div class="macro-grid">${cards}</div>`;
+  }
+
+  function macroCardHTML(mb, i, pctMap) {
+    const pos = mb.latest >= 0;
+    const pct = pctMap[mb.name];
+    return `<div class="macro-card">
+      <div class="mhead">
+        <span class="mname">${utils.esc(mb.name)}</span>
+        <span class="mbadges">
+          <span class="mbadge ${pos ? 'up' : 'dn'}">${pos ? '+' : ''}${mb.latest.toFixed(1)}</span>
+          ${pct != null ? `<span class="mbadge rs">RS ${Math.round(pct * 100)}%</span>` : ''}
+        </span>
+      </div>
+      <div class="mplot">${macroChartSVG(mb, i)}<div class="mtip" id="mtip-${i}"></div></div>
     </div>`;
+  }
+
+  function macroChartSVG(mb, i) {
+    const osc = mb.osc, n = osc.length;
+    const W = 340, H = 150, L = 6, R = 44, T = 10, B = 16;
+    const ph = H - T - B, pw = W - L - R;
+    const amax = Math.max(...osc.map(Math.abs), 0.001);
+    const ymax = Math.ceil(amax / 10) * 10 + 10;
+    const X = k => L + pw * k / (n - 1);
+    const Y = v => T + ph * (1 - (v + ymax) / (2 * ymax));
+    const green = state.theme === 'dark' ? '#3dd68c' : '#1e7a4d';
+    const red = state.theme === 'dark' ? '#f87171' : '#c0392b';
+    const muted = state.theme === 'dark' ? '#9ca3af' : '#7a8794';
+    const zero = state.theme === 'dark' ? '#4a5568' : '#9aa6b2';
+
+    let p = [];
+    p.push(`<line x1="${L}" y1="${Y(0).toFixed(1)}" x2="${L + pw}" y2="${Y(0).toFixed(1)}" stroke="${zero}" stroke-width="1"/>`);
+    for (let k = 1; k < n; k++) {
+      const col = (osc[k - 1] + osc[k]) / 2 >= 0 ? green : red;
+      p.push(`<line x1="${X(k - 1).toFixed(1)}" y1="${Y(osc[k - 1]).toFixed(1)}" x2="${X(k).toFixed(1)}" y2="${Y(osc[k]).toFixed(1)}" stroke="${col}" stroke-width="1.3"/>`);
+    }
+    const lx = X(n - 1), ly = Y(osc[n - 1]);
+    p.push(`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.5" fill="${state.theme === 'dark' ? '#e8eaf0' : '#111'}"/>`);
+    p.push(`<text x="${L + pw + 4}" y="${Y(ymax) + 3}" font-size="9" fill="${muted}">+${ymax}</text>`);
+    p.push(`<text x="${L + pw + 4}" y="${Y(0) + 3}" font-size="9" fill="${muted}">0</text>`);
+    p.push(`<text x="${L + pw + 4}" y="${Y(-ymax) + 3}" font-size="9" fill="${muted}">-${ymax}</text>`);
+    p.push(`<line id="mcross-${i}" x1="0" y1="${T}" x2="0" y2="${T + ph}" stroke="${state.theme === 'dark' ? '#9ca3af' : '#5a6672'}" stroke-width="1" stroke-dasharray="3 3" style="visibility:hidden"/>`);
+    p.push(`<circle id="mdot-${i}" r="3" fill="${state.theme === 'dark' ? '#e8eaf0' : '#111'}" style="visibility:hidden"/>`);
+    return `<svg id="msvg-${i}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="mbrd-svg">${p.join('')}</svg>`;
+  }
+
+  function bindMacroEvents(data) {
+    const macros = data.macros || [];
+    macros.forEach((mb, i) => {
+      const svg = document.getElementById('msvg-' + i);
+      const tip = document.getElementById('mtip-' + i);
+      const cross = document.getElementById('mcross-' + i);
+      const dot = document.getElementById('mdot-' + i);
+      if (!svg || !tip) return;
+      const osc = mb.osc, dates = mb.dates, n = osc.length;
+      const W = 340, H = 150, L = 6, R = 44, T = 10, B = 16;
+      const ph = H - T - B, pw = W - L - R;
+      const amax = Math.max(...osc.map(Math.abs), 0.001);
+      const ymax = Math.ceil(amax / 10) * 10 + 10;
+      const X = k => L + pw * k / (n - 1);
+      const Y = v => T + ph * (1 - (v + ymax) / (2 * ymax));
+      const fmtD = s => {
+        const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const a = s.split('-');
+        return a[2] + ' ' + m[+a[1] - 1] + ' ' + a[0];
+      };
+      svg.addEventListener('mousemove', function (e) {
+        const r = svg.getBoundingClientRect();
+        const sx = W / r.width;
+        const x = (e.clientX - r.left) * sx;
+        let k = Math.round((x - L) / pw * (n - 1));
+        if (k < 0) k = 0; if (k >= n) k = n - 1;
+        const px = X(k), py = Y(osc[k]);
+        cross.setAttribute('x1', px); cross.setAttribute('x2', px);
+        cross.style.visibility = 'visible';
+        dot.setAttribute('cx', px); dot.setAttribute('cy', py);
+        dot.style.visibility = 'visible';
+        const v = osc[k];
+        tip.innerHTML = `<b>${fmtD(dates[k])}</b>${v >= 0 ? '+' : ''}${v.toFixed(1)}`;
+        tip.style.visibility = 'visible';
+        const tipW = tip.offsetWidth;
+        const plotW = svg.parentNode.clientWidth;
+        let left = (e.clientX - r.left) - tipW / 2;
+        left = Math.max(2, Math.min(left, plotW - tipW - 2));
+        tip.style.left = left + 'px';
+        tip.style.top = (py * (r.height / H) - 30) + 'px';
+      });
+      svg.addEventListener('mouseleave', function () {
+        cross.style.visibility = 'hidden';
+        dot.style.visibility = 'hidden';
+        tip.style.visibility = 'hidden';
+      });
+    });
   }
 
   function bindBreadthEvents(data) {

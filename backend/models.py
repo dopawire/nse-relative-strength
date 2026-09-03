@@ -45,9 +45,17 @@ class LevelResponse(BaseModel):
     groups: list[GroupOut]
 
 
+class MacroBreadth(BaseModel):
+    name: str
+    dates: list[str]
+    osc: list[float]
+    latest: float
+
+
 class BreadthResponse(BaseModel):
     dates: list[str]
     osc: list[float]
     n: int
     latest: float
     span: str
+    macros: list[MacroBreadth] = []
