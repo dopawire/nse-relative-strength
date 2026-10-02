@@ -526,7 +526,26 @@
       <div class="brd-cap">Latest reading <b>${latest >= 0 ? '+' : ''}${latest.toFixed(1)}</b>. Extreme lows (≈ −40 and below) flag oversold / possible bottoms; extreme highs (≈ +40 and above) flag overbought — reversal warnings.</div>
       <blockquote class="brd-q">Zanger: "I use one custom oscillator in particular which uses market breadth advance-decline data to give me a heads up on trend strength and potential reversals. When it hits extreme lows or highs, it usually means a reversal of some sort is ahead."</blockquote>
     </div>
-    ${macroBreadthSection(data, pctMap)}`;
+    ${macroBreadthSection(data, pctMap)}
+    ${provenanceHTML()}`;
+  }
+
+  // ---- Data provenance (which dates came from something other than Yahoo) ----
+  function provenanceHTML() {
+    const src = (state.meta && state.meta.src) || {};
+    const dates = Object.keys(src).sort();
+    if (!dates.length) return '';
+    const counts = {};
+    for (const d of dates) counts[src[d]] = (counts[src[d]] || 0) + 1;
+    const summary = Object.entries(counts).map(([k, v]) => `${v} via ${k}`).join(' · ');
+    const items = dates.map(d => `<li>${d} — <code>${src[d]}</code></li>`).join('');
+    return `<details class="prov"><summary>Data provenance — ${dates.length} date(s) not from Yahoo daily bars · ${summary}</summary>
+      <ul class="prov-list">${items}</ul>
+      <p class="prov-note">All other trading days use Yahoo daily closes.
+      Sources: <code>investing.com</code> — official index close ·
+      <code>bhavcopy</code> — NSE official EOD file ·
+      <code>intraday</code> — reconstructed from Yahoo 5-minute bars ·
+      <code>synthetic</code> — equal-weight stock returns.</p></details>`;
   }
 
   // ---- Macro breadth dashboard (12 small oscillator charts) ----

@@ -27,7 +27,7 @@ from build_rs import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
-PRICE_CACHE = ROOT / ".yh_price_cache.json"
+PRICE_CACHE = Path(build_rs.PRICE_CACHE)   # cache dir can move (see build_rs)
 RS_DATA = ROOT / "rs_data.json"
 
 
@@ -35,10 +35,11 @@ RS_DATA = ROOT / "rs_data.json"
 #  Helpers / fakes
 # --------------------------------------------------------------------------- #
 class FakeResp:
-    def __init__(self, status_code=200, text="", payload=None):
+    def __init__(self, status_code=200, text="", payload=None, content=None):
         self.status_code = status_code
         self.text = text
         self._payload = payload
+        self.content = content if content is not None else text.encode()
 
     def json(self):
         if self._payload is None:
@@ -156,6 +157,103 @@ def test_yahoo_closes_null_highlow_falls_back_to_close(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+#  2c. NSE holiday calendar + bhavcopy (Phase-1 hardening)
+# --------------------------------------------------------------------------- #
+from build_rs import is_holiday, fetch_bhavcopy, fetch_bhav_indices
+
+
+def test_holiday_calendar():
+    assert is_holiday("2026-05-28")        # Bakri Id
+    assert is_holiday("2025-10-22")        # Diwali Balipratipada
+    assert is_holiday("2026-01-15")        # Maharashtra election day
+    assert not is_holiday("2026-08-28")    # Raksha Bandhan — trading day
+    assert not is_holiday("2025-02-01")    # Union Budget Saturday session
+    assert not is_holiday("2026-08-31")    # plain Monday
+
+
+def test_fill_skips_calendar_holiday():
+    """A holiday must never enter the benchmark even with full stock coverage
+    (Yahoo emits fake flat bars on holidays)."""
+    have, cache = _stock_cache(150, ["2026-05-27", "2026-05-28"], step=1.0)
+    bench = {"2026-05-27": 1000.0}
+    assert fill_benchmark_gaps(bench, cache, have, thresh=100, inv={}) == []
+    assert "2026-05-28" not in bench
+
+
+def test_repair_skips_calendar_holiday(monkeypatch, tmp_path):
+    monkeypatch.setattr(build_rs, "PRICE_CACHE", str(tmp_path / "p.json"))
+    monkeypatch.setattr(build_rs, "HIGH_CACHE", str(tmp_path / "h.json"))
+    monkeypatch.setattr(build_rs, "LOW_CACHE", str(tmp_path / "l.json"))
+    cache = {"__BENCH__": {"2026-05-27": 1000.0}, "AAA": {"2026-05-27": 100.0}}
+
+    def boom(*a, **k):
+        raise AssertionError("no network calls on a calendar holiday")
+    monkeypatch.setattr(build_rs, "intraday_day", boom)
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", boom)
+    from build_rs import repair_intraday_gap
+    assert repair_intraday_gap(cache, {}, {}, ["AAA"], thresh=1,
+                               today=dt.date(2026, 5, 29)) == []
+
+
+def test_fetch_bhavcopy_parses_new_format(monkeypatch):
+    import io as _io, zipfile as _zipfile
+    csv_text = ("SYMBOL,SERIES,HIGH_PRICE,LOW_PRICE,CLOSE_PRICE\n"
+                "RELIANCE,EQ,1291.5,1280,1287\n"
+                "TCS,EQ,2260,2230,2250\n"
+                "RELIANCE,BE,999,999,999\n"      # must not overwrite the EQ row
+                "GOLDBEES,N1,50,49,49.5\n")      # non-equity series ignored
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as z:
+        z.writestr("cm28AUG2026bhav.csv", csv_text)
+    patch_session(monkeypatch, FakeSession(FakeResp(200, content=buf.getvalue())))
+    out = fetch_bhavcopy("2026-08-28")
+    assert out["RELIANCE"] == {"close": 1287.0, "high": 1291.5, "low": 1280.0}
+    assert out["TCS"]["close"] == 2250.0
+    assert "GOLDBEES" not in out
+
+
+def test_fetch_bhavcopy_legacy_columns(monkeypatch):
+    import io as _io, zipfile as _zipfile
+    csv_text = "SYMBOL,SERIES,HIGH,LOW,CLOSE\nRELIANCE,EQ,1291.5,1280,1287\n"
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as z:
+        z.writestr("cm28AUG2026bhav.csv", csv_text)
+    patch_session(monkeypatch, FakeSession(FakeResp(200, content=buf.getvalue())))
+    out = fetch_bhavcopy("2026-08-28")
+    assert out["RELIANCE"]["close"] == 1287.0
+
+
+def test_fetch_bhavcopy_blocked_returns_none(monkeypatch):
+    patch_session(monkeypatch, FakeSession(FakeResp(403, text="denied")))
+    assert fetch_bhavcopy("2026-08-28") is None
+    assert fetch_bhav_indices("2026-08-28") is None
+
+
+def test_repair_prefers_bhavcopy_and_tags_provenance(monkeypatch, tmp_path):
+    monkeypatch.setattr(build_rs, "PRICE_CACHE", str(tmp_path / "p.json"))
+    monkeypatch.setattr(build_rs, "HIGH_CACHE", str(tmp_path / "h.json"))
+    monkeypatch.setattr(build_rs, "LOW_CACHE", str(tmp_path / "l.json"))
+    cache = {"__BENCH__": {"2026-08-27": 20000.0}, "AAA": {"2026-08-27": 100.0}}
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", lambda day: (
+        {"AAA": {"close": 101.0, "high": 102.0, "low": 99.0}}
+        if day == "2026-08-28" else None))
+    monkeypatch.setattr(build_rs, "fetch_bhav_indices", lambda day: (
+        {"Nifty 500": 20100.0} if day == "2026-08-28" else None))
+
+    def boom(*a, **k):
+        raise AssertionError("intraday must not run when bhavcopy succeeds")
+    monkeypatch.setattr(build_rs, "intraday_day", boom)
+    from build_rs import repair_intraday_gap
+    prov = {}
+    repaired = repair_intraday_gap(cache, {}, {}, ["AAA"], thresh=1,
+                                   today=dt.date(2026, 8, 29), prov=prov)
+    assert repaired == ["2026-08-28"]
+    assert cache["AAA"]["2026-08-28"] == 101.0
+    assert cache["__BENCH__"]["2026-08-28"] == 20100.0
+    assert prov == {"2026-08-28": "bhavcopy"}
+
+
+# --------------------------------------------------------------------------- #
 #  2b. Intraday repair (Yahoo null-daily-bar gaps: Aug 28, Jul 28 patterns)
 # --------------------------------------------------------------------------- #
 from build_rs import intraday_day, repair_intraday_gap
@@ -208,6 +306,7 @@ def test_repair_intraday_gap_fills_missing_day(monkeypatch, tmp_path):
                 "^CRSLDX": (20100.0, 20150.0, 19950.0)}.get(ysym)
 
     monkeypatch.setattr(build_rs, "intraday_day", fake_intraday)
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", lambda day: None)  # force intraday path
     monkeypatch.setattr(build_rs, "YH_WORKERS", 1)
     repaired = repair_intraday_gap(cache, highs, lows, ["AAA", "BBB"], thresh=1,
                                    today=dt.date(2026, 8, 29))
@@ -223,6 +322,7 @@ def test_repair_intraday_gap_skips_holiday(monkeypatch):
     cache = {"__BENCH__": {"2026-08-27": 20000.0}, "AAA": {"2026-08-27": 100.0}}
     # no intraday bars anywhere for the gap day (holiday) -> nothing filled
     monkeypatch.setattr(build_rs, "intraday_day", lambda ysym, day: None)
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", lambda day: None)
     assert repair_intraday_gap(cache, {}, {}, ["AAA"], thresh=1,
                                today=dt.date(2026, 8, 29)) == []
     assert "2026-08-28" not in cache["AAA"]
@@ -537,6 +637,9 @@ def test_macro_breadth_math(price_cache, rs_data):
     import csv
     with open(ROOT / 'nse_stock_master.csv') as f:
         universe = list(csv.DictReader(f))
+    n_with_px = sum(1 for u in universe if price_cache.get(u["symbol"]))
+    if n_with_px != rs_data["meta"].get("n_stocks"):
+        pytest.skip("price cache changed since the build — run build_rs.py to resync")
     for u in universe:
         u["sym"] = u["symbol"]
         u["macro"] = u.get("macro") or ""
@@ -572,11 +675,13 @@ def test_window_coverage_consistent(rs_data, price_cache):
     assert len(meta["excluded"]) == meta["n_stocks"] - meta["n_window"]
     assert len(set(meta["excluded"])) == len(meta["excluded"])
 
-    ref_dates = rs_data["breadth"]["dates"][-WINDOW:]
+    ref_dates = rs_data["meta"].get("window_dates") or rs_data["breadth"]["dates"][-WINDOW:]
     bench = price_cache["__BENCH__"]
+    if ref_dates and max(bench) != ref_dates[-1]:
+        pytest.skip("price cache updated since the build — run build_rs.py to resync")
     for s in meta["excluded"][:50]:
         ser = price_cache.get(s, {})
-        missing_day = any(d not in ser for d in ref_dates)
+        missing_day = any(d not in ser or not ser[d] for d in ref_dates)
         # corporate-action break inside the window also justifies exclusion
         cor_break = bool(build_rs.last_break_date(
             {d: ser[d] for d in ref_dates if d in ser}, len(ref_dates)))

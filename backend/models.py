@@ -10,6 +10,7 @@ class MetaResponse(BaseModel):
     n_groups_per_level: list[int]
     n_window: int = 0          # stocks with full window data (in the levels)
     excluded: list[str] = []   # stocks with price data but no window coverage
+    src: dict[str, str] = {}   # {date: source} for non-Yahoo benchmark bars
 
 
 class LevelSummary(BaseModel):

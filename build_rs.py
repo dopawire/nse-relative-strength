@@ -29,13 +29,16 @@ Usage:
 """
 
 import os
+import io
 import sys
 import csv
 import json
 import time
 import math
 import html
+import shutil
 import random
+import zipfile
 import argparse
 import datetime as dt
 import threading
@@ -46,11 +49,35 @@ import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
-PRICE_CACHE  = os.path.join(HERE, ".yh_price_cache.json")   # {sym: {date: close}}
-HIGH_CACHE   = os.path.join(HERE, ".yh_high_cache.json")    # {sym: {date: intraday high}}
-LOW_CACHE    = os.path.join(HERE, ".yh_low_cache.json")     # {sym: {date: intraday low}}
+
+# Caches live OUTSIDE the repo: the project can sit on a fuseblk (NTFS) volume
+# that strips exec bits and corrupted a cache once.  Override with
+# NSE_RS_CACHE_DIR.  A one-time migration copies any legacy in-repo caches.
+CACHE_DIR    = os.environ.get("NSE_RS_CACHE_DIR") or os.path.join(
+    os.path.expanduser("~"), ".cache", "nse-rs")
+os.makedirs(CACHE_DIR, exist_ok=True)
+PRICE_CACHE  = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # {sym: {date: close}}
+HIGH_CACHE   = os.path.join(CACHE_DIR, ".yh_high_cache.json")    # {sym: {date: intraday high}}
+LOW_CACHE    = os.path.join(CACHE_DIR, ".yh_low_cache.json")     # {sym: {date: intraday low}}
+PROVENANCE   = os.path.join(CACHE_DIR, ".yh_provenance.json")    # {date: source} for non-Yahoo bars
+BUILD_LOCK   = os.path.join(CACHE_DIR, ".build.lock")
 OUT_HTML     = os.path.join(HERE, "rs_view.html")
 RS_DATA_JSON = os.path.join(HERE, "rs_data.json")
+
+
+def migrate_legacy_caches():
+    """MOVE in-repo caches (old NTFS location) into CACHE_DIR once."""
+    for name in (".yh_price_cache.json", ".yh_high_cache.json",
+                 ".yh_low_cache.json", ".yh_provenance.json"):
+        dst = os.path.join(CACHE_DIR, name)
+        src = os.path.join(HERE, name)
+        if not os.path.exists(dst) and os.path.exists(src):
+            shutil.copy(src, dst)
+            os.remove(src)               # single source of truth — no divergence
+            print(f"Migrated {name} → {CACHE_DIR}")
+
+
+migrate_legacy_caches()
 
 # Yahoo Finance chart API (free, no key). NSE cash symbols use the ".NS" suffix.
 YH_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval=1d"
@@ -72,6 +99,28 @@ BENCHMARK_NAME = "NIFTY 500"
 BENCH_YSYM     = "^CRSLDX"     # Yahoo ticker for NIFTY 500 (NIFTY 50 = ^NSEI)
 YH_WORKERS     = 8            # concurrent Yahoo fetches
 IST            = dt.timezone(dt.timedelta(hours=5, minutes=30))   # NSE trading day
+
+HOLIDAYS_CSV   = os.path.join(HERE, "nse_holidays.csv")   # NSE trading holidays
+_holidays_cache = None
+
+
+def load_holidays():
+    """NSE trading-holiday calendar from nse_holidays.csv (date,description)."""
+    global _holidays_cache
+    if _holidays_cache is None:
+        _holidays_cache = set()
+        if os.path.exists(HOLIDAYS_CSV):
+            with open(HOLIDAYS_CSV, newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    d = (row.get("date") or "").strip()
+                    if d:
+                        _holidays_cache.add(d)
+    return _holidays_cache
+
+
+def is_holiday(iso_date):
+    """True when the NSE was closed on this date (official holiday calendar)."""
+    return iso_date in load_holidays()
 
 # 4-level NSE classification -> tabs. (csv column, tab label)
 LEVELS = [("macro", "Macro"), ("sector", "Sector"),
@@ -291,14 +340,93 @@ def fetch_prices(universe, cache, highs, lows, fast=False):
     return ok, miss
 
 
-def repair_intraday_gap(cache, highs, lows, have, thresh, today=None):
+# --------------------------------------------------------------------------- #
+#  NSE official EOD bhavcopy (authoritative closes; Indian IPs only)
+# --------------------------------------------------------------------------- #
+def fetch_bhavcopy(day):
+    """NSE's official end-of-day bhavcopy for one day → {SYMBOL: {close, high,
+    low}}.  This is the AUTHORITATIVE closing price series (better than
+    Yahoo's).  Geo-restricted to Indian IPs — returns None when blocked.
+    Two URL generations are tried (current + legacy naming)."""
+    d = dt.date.fromisoformat(day)
+    ymd = d.strftime("%Y%m%d")
+    mon = d.strftime("%b").upper()
+    urls = [
+        f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{ymd}_F_0000.csv.zip",
+        f"https://nsearchives.nseindia.com/content/historical/EQUITIES/"
+        f"{d.year}/{mon}/cm{d.day:02d}{mon}{d.year}bhav.csv.zip",
+    ]
+    for url in urls:
+        try:
+            r = _session().get(url, timeout=30)
+            if r.status_code != 200:
+                continue
+            z = zipfile.ZipFile(io.BytesIO(r.content))
+            name = z.namelist()[0]
+            rows = csv.DictReader(
+                io.StringIO(z.read(name).decode("utf-8-sig", "ignore")))
+
+            def fnum(row, k1, k2):
+                v = row.get(k1) or row.get(k2) or ""
+                try:
+                    return float(str(v).replace(",", ""))
+                except ValueError:
+                    return None
+
+            out = {}
+            for row in rows:
+                sym = (row.get("SYMBOL") or "").strip()
+                if not sym:
+                    continue
+                series = (row.get("SERIES") or "").strip()
+                if series and series not in ("EQ", "BE", "BZ", "SM", "ST"):
+                    continue                   # skip debt/ETF/other segments
+                c = fnum(row, "CLOSE_PRICE", "CLOSE")
+                if c is None or c <= 0:
+                    continue
+                if sym in out and series != "EQ":
+                    continue                   # prefer the EQ row on duplicates
+                out[sym] = {"close": c,
+                            "high": fnum(row, "HIGH_PRICE", "HIGH") or c,
+                            "low": fnum(row, "LOW_PRICE", "LOW") or c}
+            return out if out else None
+        except Exception:
+            continue
+    return None
+
+
+def fetch_bhav_indices(day):
+    """NSE's all-indices closing CSV for one day → {"Nifty 500": 23528.55, ...}.
+    Geo-restricted to Indian IPs — returns None when blocked."""
+    d = dt.date.fromisoformat(day)
+    url = (f"https://nsearchives.nseindia.com/content/indices/"
+           f"ind_close_all_{d.day:02d}{d.month:02d}{d.year}.csv")
+    try:
+        r = _session().get(url, timeout=30)
+        if r.status_code != 200:
+            return None
+        out = {}
+        for row in csv.DictReader(io.StringIO(r.text)):
+            name = (row.get("Index Name") or "").strip()
+            try:
+                out[name] = float(
+                    str(row.get("Closing Index Value") or "").replace(",", ""))
+            except ValueError:
+                continue
+        return out if out else None
+    except Exception:
+        return None
+
+
+def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None):
     """Yahoo occasionally serves null DAILY bars for sessions the market was
     open, while its intraday bars exist (Aug 28 2026 — whole market; Jul 28 —
     indices only).  For each candidate weekday that lacks broad stock coverage
-    (strictly PAST days — never a session in progress), fill every missing
-    symbol from its 5m bars.  Also self-heals bogus benchmark bars: if the
-    cached bench close deviates >1% from the index's intraday close, replace
-    it.  Returns the list of repaired dates."""
+    (strictly PAST days — never a session in progress), repair every missing
+    symbol.  Source priority: (1) NSE official bhavcopy (authoritative, Indian
+    IPs) → (2) Yahoo 5-minute bars.  Also self-heals bogus benchmark bars
+    (deviates >1% from the real close).  `prov` (optional dict) is tagged with
+    {date: source}.  Returns the list of repaired dates."""
     if today is None:
         today = dt.datetime.now(IST).date()
     bench = cache.get("__BENCH__", {})
@@ -320,10 +448,44 @@ def repair_intraday_gap(cache, highs, lows, have, thresh, today=None):
     for day in candidates:
         if not (dt.date.fromisoformat(day) < today):
             continue                       # never a session in progress
+        if is_holiday(day):
+            continue                       # official NSE holiday
         cov = sum(1 for s in have if day in cache.get(s, {}))
         bench_missing = day not in bench
         if cov >= thresh and not bench_missing:
             continue                       # healthy day — nothing to do
+
+        # (1) NSE bhavcopy: one fetch covers the whole day, official prices
+        bhav = fetch_bhavcopy(day)
+        if bhav:
+            bench_val = None
+            idx = fetch_bhav_indices(day) or {}
+            for k, v in idx.items():
+                if k.strip().lower() == BENCHMARK_NAME.lower():
+                    bench_val = v
+                    break
+            filled = 0
+            if bench_val and (bench_missing or abs(bench[day] / bench_val - 1) > 0.01):
+                cache["__BENCH__"][day] = bench_val
+                filled += 1
+            for s in have:
+                if day in cache.get(s, {}):
+                    continue
+                row = bhav.get(s)
+                if not row:
+                    continue
+                cache.setdefault(s, {})[day] = row["close"]
+                highs.setdefault(s, {})[day] = row["high"]
+                lows.setdefault(s, {})[day] = row["low"]
+                filled += 1
+            if filled:
+                repaired.append(day)
+                if prov is not None:
+                    prov[day] = "bhavcopy"
+                print(f"Repaired {day} from NSE bhavcopy: {filled} symbols.")
+                continue
+
+        # (2) fallback: Yahoo 5m intraday bars
         probe = (intraday_day(BENCH_YSYM, day)
                  or (intraday_day(have[0] + ".NS", day) if have else None))
         if probe is None:
@@ -346,6 +508,8 @@ def repair_intraday_gap(cache, highs, lows, have, thresh, today=None):
                 filled += 1
         if filled:
             repaired.append(day)
+            if prov is not None:
+                prov[day] = "intraday"
             print(f"Repaired {day} from intraday bars: {filled} symbols "
                   f"(Yahoo daily bars were null).")
     if repaired:
@@ -462,6 +626,7 @@ def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
     missing = sorted(d for d in all_dates if d not in bench_dates
                      if d >= cutoff.isoformat()
                      if sum(1 for s in have if d in cache[s]) >= thresh
+                     if not is_holiday(d)
                      if not is_fake_flat_day(cache, have, d))
     if not missing:
         return []
@@ -1502,7 +1667,7 @@ def main():
     # writes and corrupt them. flock is released automatically on exit.
     try:
         import fcntl
-        _lock_fh = open(os.path.join(HERE, ".build.lock"), "w")
+        _lock_fh = open(BUILD_LOCK, "w")
         fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         sys.exit("Another build is already running (website button / terminal?). "
@@ -1548,9 +1713,13 @@ def main():
     thresh = max(1, int(0.5 * len(have)))
 
     # Repair null daily bars from intraday (Yahoo gap pattern) — fetch-based
-    # runs only; --html-only must stay offline.
+    # runs only; --html-only must stay offline.  Provenance records which
+    # dates came from something other than Yahoo's daily bars.
+    prov = load_json_cache(PROVENANCE)
     if not args.html_only:
-        repair_intraday_gap(cache, highs, lows, have, thresh)
+        _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
+        if _rep:
+            write_json_atomic(PROVENANCE, prov)
 
     # Reference window = last WINDOW benchmark dates that ALSO have broad stock
     # coverage, so a benchmark day that leads the stock cache can't null out RS.
@@ -1565,6 +1734,9 @@ def main():
               + ", ".join(f"{d} via {m}" for d, m in _filled))
         # Persist so fills survive future --html-only runs
         write_json_atomic(PRICE_CACHE, cache)
+        for d, m in _filled:
+            prov[d] = m
+        write_json_atomic(PROVENANCE, prov)
     covered = [d for d in bench_dates
                if sum(1 for s in have if d in cache[s]) >= thresh]
     ref_dates = (covered or bench_dates)[-WINDOW:]
@@ -1668,10 +1840,12 @@ def main():
               f"{excluded[:12]}{' …' if len(excluded) > 12 else ''}")
     meta = {
         "drange": f"{ref_dates[0]} → {ref_dates[-1]}" if ref_dates else "n/a",
+        "window_dates": ref_dates,
         "gen": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
         "n_stocks": n_stocks,
         "n_window": n_window,
         "excluded": excluded,
+        "src": prov,
     }
     page = build_html(levels, meta, breadth)
     with open(OUT_HTML, "w", encoding="utf-8") as fh:

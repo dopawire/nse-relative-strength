@@ -83,6 +83,7 @@ def get_meta():
         "n_groups_per_level": [len(lv.get("groups", [])) for lv in levels],
         "n_window": m.get("n_window", 0),
         "excluded": m.get("excluded", []),
+        "src": m.get("src", {}),
     }
 
 

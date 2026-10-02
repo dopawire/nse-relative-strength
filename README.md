@@ -44,8 +44,9 @@ with:
   index close), with an equal-weight synthetic from stock returns as last
   resort.
 - When Yahoo's **daily bars are null but intraday bars exist** (whole-market
-  gaps like Aug 28, 2026), the build repairs the missing day from 5-minute
-  bars automatically. Flat duplicate bars (Yahoo's holiday artifacts) are
+  gaps like Aug 28, 2026), the build repairs the missing day automatically:
+  **NSE official bhavcopy** first (Indian IPs, authoritative closes), then
+  Yahoo 5-minute bars. Flat duplicate bars (Yahoo's holiday artifacts) are
   detected and never enter the benchmark.
 
 ## Scripts
@@ -54,6 +55,7 @@ with:
 |---|---|
 | `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` + `rs_view.html`. |
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
+| `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000`. |
 
@@ -82,13 +84,18 @@ python3 refresh_classification.py --headful  # show the browser window
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/ -q
+.venv/bin/python -m pytest tests/ -q          # all (56)
+.venv/bin/python -m pytest tests/ -q -m smoke # frontend smoke only
+NO_BROWSER=1 .venv/bin/python -m pytest tests/ -q   # skip browser tests
+.venv/bin/python audit_data.py                # daily data health check
 ```
 
 Covers the benchmark gap-fill fallback chain (Yahoo index gaps → Investing.com
-scrape → synthetic equal-weight), Yahoo null-OHLC handling, RS maths, the
-RS-vs-EMA21 flag, and integrity of the generated artifacts (RS window
-alignment, market-breadth continuity, window-coverage consistency).
+scrape → synthetic equal-weight), Yahoo null-OHLC handling, the intraday/bhavcopy
+repair chain, RS maths, the RS-vs-EMA21 flag, the NSE holiday calendar, and
+integrity of the generated artifacts (RS window alignment, market-breadth
+continuity, window-coverage consistency).  Frontend smoke tests boot the real
+server and load the page in headless Chromium.
 
 ## Setup (first time)
 
@@ -108,5 +115,10 @@ python3 build_rs.py               # initial build
 - **NSE geo-blocks non-Indian IPs** (403 on every endpoint). Run
   `refresh_classification.py` from an Indian IP / VPN; the equity list falls
   back to a browser-session fetch if plain HTTP is blocked. Yahoo-based steps
-  (prices, RS, breadth) work from anywhere.
-- Price caches, `rs_data.json` and `rs_view.html` are generated and git-ignored.
+  (prices, RS, breadth) work from anywhere.  The **bhavcopy** repair source is
+  likewise Indian-IP-only (it is a fallback, not a requirement).
+- **Price caches live in `~/.cache/nse-rs/`** (override with `NSE_RS_CACHE_DIR`)
+  — outside the repo, safe from the fuseblk/NTFS quirks that once corrupted a
+  cache. `rs_data.json` and `rs_view.html` are generated and git-ignored.
+- `nse_holidays.csv` is the official NSE trading-holiday calendar — the build
+  and audit use it to skip holidays and to validate the trading calendar.
