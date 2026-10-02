@@ -83,7 +83,18 @@ def test_rotation(client):
     assert len(g["rs"]) == len(d["dates"])
 
 
-def test_stock_detail(client):
+def test_stock_detail(client, monkeypatch, tmp_path):
+    # Hermetic: synthetic price cache so CI (no real caches) works too.
+    import json
+    import backend.main as m
+    import build_rs
+    ser = {f"2026-08-{d:02d}": 100.0 + d for d in range(20, 32)}
+    ser.update({f"2026-09-{d:02d}": 112.0 + d for d in range(1, 21)})
+    bench = {d: 2000.0 + 2 * i for i, d in enumerate(sorted(ser))}
+    p = tmp_path / ".yh_price_cache.json"
+    p.write_text(json.dumps({"RELIANCE": ser, "__BENCH__": bench}))
+    monkeypatch.setattr(build_rs, "PRICE_CACHE", str(p))
+    monkeypatch.setattr(m, "_price_cache", None)
     r = client.get("/api/stock/RELIANCE")
     assert r.status_code == 200
     d = r.json()
