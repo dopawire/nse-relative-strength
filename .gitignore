@@ -7,10 +7,11 @@ __pycache__/
 
 # generated output + price caches (rebuilt by build_rs.py)
 rs_view.html
-rs_data.json
+site/
 .yh_price_cache.json
 .yh_high_cache.json
 .yh_low_cache.json
+.yh_provenance.json
 run.log
 
 # local / secrets

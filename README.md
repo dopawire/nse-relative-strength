@@ -5,7 +5,8 @@ Industry — **equally weighted**, by relative strength against the **NIFTY 500*
 with a McClellan-style **Market Breadth** oscillator.
 
 100% free data: **Yahoo Finance** for prices, **NSE** for the classification.
-No API keys, no paid subscriptions.
+No API keys, no paid subscriptions.  Released under the [MIT License](LICENSE) —
+free to use, modify and share.
 
 ## What it produces
 
@@ -60,6 +61,8 @@ with:
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000`. |
 | `cron_daily.sh` | Cron entry point: daily build + audit (+ optional Telegram failure alerts). |
 | `install_cron.sh` | Installs the cron entries (18:30 build, 19:30 stale-retry, weekdays). |
+| `export_static.py` | Build a read-only static site into `site/` (no backend needed). |
+| `publish_site.sh` | Commit + push the current `rs_data.json` snapshot (triggers the public site deploy). |
 
 ## Daily use
 
@@ -84,6 +87,15 @@ Optional free Telegram failure alerts: create a bot via @BotFather, then put
 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `~/.config/nse-rs/notify.env`
 (set `TELEGRAM_NOTIFY_OK=1` for success pings too).  CI runs the test suite on
 every push via GitHub Actions (`.github/workflows/ci.yml`).
+
+### Public site (free, for everyone)
+
+`bash publish_site.sh` commits the current `rs_data.json` snapshot and pushes —
+GitHub Actions deploys it as a **read-only** copy of the dashboard to GitHub
+Pages (works without any backend; Update/Refresh buttons are hidden).  Set
+`PUBLISH_SITE=1` in `~/.config/nse-rs/notify.env` to publish automatically
+after every successful daily build.  Requires the repository to be public
+(GitHub Pages is free for public repos only).
 
 ## Build options
 

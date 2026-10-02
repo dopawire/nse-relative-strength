@@ -32,19 +32,84 @@
   let $ = {};
 
   // =========================================================================
-  // API
+  // API — FastAPI backend when present, rs_data.json fallback for the static
+  // export (GitHub Pages): the page auto-detects and switches seamlessly.
   // =========================================================================
+  let staticData = null;   // null = backend mode; object = static mode
+
+  async function bootApi() {
+    try {
+      const r = await fetch('/api/meta', { cache: 'no-store' });
+      if (r.ok) return;                      // backend present — normal mode
+    } catch (e) { /* no backend — fall through to static mode */ }
+    const r = await fetch('rs_data.json', { cache: 'no-store' });
+    if (!r.ok) throw new Error('neither API nor rs_data.json is reachable');
+    staticData = await r.json();
+    document.body.classList.add('static-mode');
+  }
+
+  function staticMeta() {
+    const m = staticData.meta;
+    return {
+      benchmark: 'NIFTY 500',
+      window: (m.window_dates || []).length || 26,
+      drange: m.drange,
+      generated: m.gen,
+      n_stocks: m.n_stocks,
+      n_groups_per_level: staticData.levels.map(l => l.groups.length),
+      n_window: m.n_window || 0,
+      excluded: m.excluded || [],
+      src: m.src || {},
+    };
+  }
+
+  function staticBreadth() {
+    const b = staticData.breadth;
+    return {
+      dates: b.dates,
+      osc: b.osc,
+      n: b.n,
+      latest: b.osc.length ? b.osc[b.osc.length - 1] : 0.0,
+      span: b.dates.length ? `${b.dates[0]} → ${b.dates[b.dates.length - 1]}` : '',
+      macros: b.macros || [],
+    };
+  }
+
   const api = {
     async get(url) {
       const r = await fetch(url);
       if (!r.ok) throw new Error(`API ${r.status}: ${url}`);
       return r.json();
     },
-    async meta()      { return api.get('/api/meta'); },
-    async levels()    { return api.get('/api/levels'); },
-    async level(key)  { return api.get(`/api/levels/${key}`); },
-    async group(gid)  { return api.get(`/api/groups/${gid}`); },
-    async breadth()   { return api.get('/api/breadth'); },
+    async meta() {
+      return staticData ? staticMeta() : api.get('/api/meta');
+    },
+    async levels() {
+      return staticData
+        ? staticData.levels.map(l => ({ key: l.key, label: l.label, n_groups: l.groups.length }))
+        : api.get('/api/levels');
+    },
+    async level(key) {
+      if (staticData) {
+        const lv = staticData.levels.find(l => l.key === key);
+        if (!lv) throw new Error(`no such level: ${key}`);
+        return lv;
+      }
+      return api.get(`/api/levels/${key}`);
+    },
+    async group(gid) {
+      if (staticData) {
+        for (const lv of staticData.levels) {
+          const g = lv.groups.find(g => g.id === gid);
+          if (g) return g;
+        }
+        throw new Error(`no such group: ${gid}`);
+      }
+      return api.get(`/api/groups/${gid}`);
+    },
+    async breadth() {
+      return staticData ? staticBreadth() : api.get('/api/breadth');
+    },
   };
 
   // =========================================================================
@@ -1113,6 +1178,23 @@
     // Theme
     initTheme();
     $.themeToggle.addEventListener('click', toggleTheme);
+
+    // Boot the API — falls back to rs_data.json on the static export
+    try {
+      await bootApi();
+    } catch (e) {
+      $.content.innerHTML = `<div class="brd-empty">Failed to load data.<br><br><code>${e.message}</code></div>`;
+      return;
+    }
+    if (staticData) {
+      $.btnUpdate.style.display = 'none';
+      $.btnRefreshStocks.style.display = 'none';
+      const tag = document.createElement('span');
+      tag.className = 'static-tag';
+      tag.textContent = 'read-only snapshot';
+      $.note.appendChild(document.createTextNode(' '));
+      $.note.appendChild(tag);
+    }
 
     // Fetch meta + levels
     try {

@@ -42,3 +42,12 @@ fi
 if [ "${TELEGRAM_NOTIFY_OK:-0}" = "1" ]; then
     notify "✅ nse-rs daily build + audit OK ($(date '+%F %T'))"
 fi
+
+# optional: publish the snapshot to the public site (PUBLISH_SITE=1)
+if [ "${PUBLISH_SITE:-0}" = "1" ]; then
+    if /bin/bash publish_site.sh >> run.log 2>&1; then
+        echo "[$(date '+%F %T')] site published" >> run.log
+    else
+        notify "⚠️ nse-rs site publish failed — see run.log"
+    fi
+fi
