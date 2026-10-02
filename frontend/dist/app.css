@@ -399,6 +399,50 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 }
 
 /* ---- Print ---- */
+/* Phase 4: watchlist, deltas, stock modal, divergence, IPO table */
+.wstar{background:none;border:none;cursor:pointer;font-size:11px;
+  color:var(--text-muted);padding:0 4px 0 0;vertical-align:middle}
+.wstar.on{color:var(--amber)}
+.delta{display:inline-block;margin-left:6px;font-family:var(--font-mono);
+  font-size:9.5px;font-weight:700;padding:1px 5px;border-radius:8px;
+  vertical-align:middle}
+.delta.up{background:var(--accent-bg);color:var(--accent)}
+.delta.dn{background:var(--red-bg);color:var(--red);opacity:.85}
+.div-warn{margin:10px 0 0;padding:9px 14px;border-radius:var(--radius-sm);
+  font-size:12px;line-height:1.5}
+.div-warn.bear{background:var(--red-bg);color:var(--red);border:1px solid var(--red-dim)}
+.div-warn.bull{background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-dim)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;
+  align-items:center;justify-content:center;z-index:50;padding:24px}
+.modal.open{display:flex}
+.modal-card{background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);max-width:760px;width:100%;padding:16px 18px;
+  max-height:90vh;overflow:auto}
+.modal-head{display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:8px}
+.modal-head .sm-name{font-weight:650;font-size:14px;color:var(--text)}
+.modal-close{background:none;border:none;color:var(--text-muted);
+  font-size:16px;cursor:pointer}
+.modal-close:hover{color:var(--text)}
+.sm-plot{position:relative}
+.sm-legend{display:flex;gap:14px;align-items:center;font-size:11px;
+  color:var(--text-soft);margin-bottom:4px}
+.sm-legend .lg-rs{border-left:3px solid #60a5fa;padding-left:6px}
+.sm-legend .lg-ema{border-left:3px solid #fbbf24;padding-left:6px}
+.sm-legend .sm-ltp{margin-left:auto;font-family:var(--font-mono);
+  font-size:10.5px;color:var(--text-muted)}
+.sm-tip .tip-ema{color:#fbbf24;font-style:normal;margin-left:8px}
+.ipo-table{width:100%;border-collapse:collapse;margin-top:10px;
+  background:var(--bg-card);border:1px solid var(--border);
+  border-radius:var(--radius);overflow:hidden}
+.ipo-table th{font-size:11px;font-weight:650;color:var(--text-muted);
+  text-align:left;padding:10px 16px;border-bottom:1px solid var(--border)}
+.ipo-table td{padding:8px 16px;border-bottom:1px solid var(--border-sub);
+  font-size:12px;color:var(--text)}
+.ipo-table tr.ipo-row{cursor:pointer}
+.ipo-table tr.ipo-row:hover{background:var(--bg-hover)}
+#watch-tog.on{background:var(--amber);color:#fff}
+
 @media print{
   .stat-row,.tab-bar,.search-row,.filter-row,.sel-row,.theme-toggle,.brd-scroll{display:none}
   .app-shell{max-width:100%;padding:0}

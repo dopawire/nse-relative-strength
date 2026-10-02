@@ -961,6 +961,182 @@ def compute_macro_breadth(universe, cache, covered_dates):
     return out
 
 
+# --------------------------------------------------------------------------- #
+#  Phase 4: rotation RS-lines, IPO watch, snapshots, divergence, daily report
+# --------------------------------------------------------------------------- #
+SNAPSHOTS = os.path.join(CACHE_DIR, "snapshots.jsonl")   # daily ranking archive
+
+
+def compute_rotation(universe, cache, bench, covered_dates, level="sector"):
+    """Full-history RS line per group (chain-linked equal-weight index vs the
+    benchmark, both rebased to 1.0 at the first covered date).  Handles stocks
+    listing/delisting mid-history via daily cross-sectional returns.  Returns
+    {"dates": [...], "groups": [{"name", "rs"} ...]} for the rotation view."""
+    by_group = defaultdict(list)
+    for u in universe:
+        ser = cache.get(u["sym"])
+        if ser and u.get(level):
+            by_group[u[level]].append(ser)
+
+    def chain(series):
+        idx = [100.0]
+        for i in range(1, len(covered_dates)):
+            prev, cur = covered_dates[i - 1], covered_dates[i]
+            rets = [s[cur] / s[prev] - 1 for s in series
+                    if s.get(prev) and s.get(cur)]
+            idx.append(idx[-1] * (1 + (sum(rets) / len(rets) if rets else 0.0)))
+        return idx
+
+    bench_idx = chain([bench])
+    groups = []
+    for name, series in sorted(by_group.items()):
+        if len(series) < 5:
+            continue
+        gi = chain(series)
+        rs = [round(gi[i] / bench_idx[i], 4) for i in range(len(covered_dates))]
+        groups.append({"name": name, "rs": rs})
+    return {"dates": covered_dates, "groups": groups}
+
+
+def detect_breadth_divergence(bench, bdates, bosc):
+    """Zanger-style divergence: the index closes near its 26-day high while the
+    breadth oscillator prints a LOWER high than at the previous index-peak
+    (bearish), or the mirror image (bullish)."""
+    if len(bosc) < 26 or len(bdates) != len(bosc):
+        return {"state": "none"}
+    idx = {d: i for i, d in enumerate(bdates)}
+    closes = {d: v for d, v in bench.items() if d in idx}
+    if len(closes) < 26:
+        return {"state": "none"}
+    days = sorted(closes)[-26:]
+    hi = max(closes[d] for d in days)
+    lo = min(closes[d] for d in days)
+    last = days[-1]
+    i_last = idx[last]
+    if closes[last] >= 0.99 * hi:
+        # at highs — find the previous near-high date inside the window
+        for d in reversed(days[:-1]):
+            if closes[d] >= 0.99 * hi:
+                if bosc[i_last] < bosc[idx[d]]:
+                    return {"state": "bearish",
+                            "note": f"index at 26-day highs but breadth "
+                                    f"({bosc[i_last]:+.1f}) below its level at "
+                                    f"the previous peak ({bosc[idx[d]]:+.1f}, {d})"}
+                break
+    if closes[last] <= 1.01 * lo:
+        for d in reversed(days[:-1]):
+            if closes[d] <= 1.01 * lo:
+                if bosc[i_last] > bosc[idx[d]]:
+                    return {"state": "bullish",
+                            "note": f"index at 26-day lows but breadth "
+                                    f"({bosc[i_last]:+.1f}) above its level at "
+                                    f"the previous trough ({bosc[idx[d]]:+.1f}, {d})"}
+                break
+    return {"state": "none"}
+
+
+def load_previous_snapshot():
+    """Last line of the ranking archive, or None."""
+    if not os.path.exists(SNAPSHOTS):
+        return None
+    try:
+        with open(SNAPSHOTS) as fh:
+            last = ""
+            for line in fh:
+                if line.strip():
+                    last = line
+            return json.loads(last) if last else None
+    except Exception:
+        return None
+
+
+def append_snapshot(levels, window_end):
+    """Append today's rankings to the archive (one JSONL line per window end;
+    idempotent across rebuilds of the same day)."""
+    prev = load_previous_snapshot()
+    if prev and prev.get("end") == window_end:
+        return prev
+    g = {}
+    m = {}
+    for key, _label, items in levels:
+        g[key] = {}
+        for it in items:
+            g[key][it["name"]] = round(it["pct"], 4)
+            for stock in it["members"]:
+                m[stock["sym"]] = round(stock["pct"], 4)
+    line = {"end": window_end,
+            "gen": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "g": g, "m": m}
+    with open(SNAPSHOTS, "a") as fh:
+        fh.write(json.dumps(line, separators=(",", ":")) + "\n")
+    return line
+
+
+def build_ipo_watch(universe, cache, excluded):
+    """New listings not yet rankable (< WINDOW days of data): symbol, name,
+    first trading day, days of history, LTP, days until first ranking."""
+    out = []
+    for u in universe:
+        sym = u["sym"]
+        if sym not in excluded:
+            continue
+        ser = cache.get(sym)
+        if not ser or len(ser) >= WINDOW:
+            continue
+        first = min(ser)
+        out.append({"s": sym, "n": u["name"], "first": first,
+                    "days": len(ser), "ltp": round(ser[max(ser)], 2),
+                    "eta": WINDOW - len(ser)})
+    out.sort(key=lambda x: x["first"], reverse=True)
+    return out
+
+
+def write_daily_report(path, meta, breadth, levels, ipo):
+    """One-page printable HTML digest of today's snapshot."""
+    def pct(v):
+        return f"{v * 100:.0f}%"
+    macro = next((it for key, _l, items in levels if key == "macro"
+                  for it in items), None)
+    sector = [it for key, _l, items in levels if key == "sector" for it in items]
+    rows = "".join(
+        f"<tr><td>{g['name']}</td><td>{pct(g['pct'])}</td>"
+        f"<td>{g['n']}</td></tr>"
+        for g in sorted(sector, key=lambda x: -x["pct"])[:10])
+    bot = "".join(
+        f"<tr><td>{g['name']}</td><td>{pct(g['pct'])}</td>"
+        f"<td>{g['n']}</td></tr>"
+        for g in sorted(sector, key=lambda x: x["pct"])[:5])
+    div = breadth.get("divergence") or {"state": "none"}
+    src = meta.get("src") or {}
+    html = f"""<!doctype html><meta charset="utf-8">
+<title>NSE RS daily digest — {meta['drange']}</title>
+<style>body{{font:14px system-ui;max-width:780px;margin:24px auto;padding:0 16px;color:#222}}
+h1{{font-size:20px}} h2{{font-size:15px;margin-top:22px}}
+table{{border-collapse:collapse}} td,th{{border:1px solid #ddd;padding:5px 12px;font-size:13px}}
+.num{{font-variant-numeric:tabular-nums}} .muted{{color:#777;font-size:12px}}</style>
+<h1>NSE Relative Strength — daily digest</h1>
+<p class="muted">{meta['gen']} · window {meta['drange']} · {meta['n_window']}/{meta['n_stocks']} stocks in view</p>
+<h2>Market breadth</h2>
+<p>Latest oscillator: <b>{breadth['osc'][-1]:+.1f}</b> · divergence: <b>{div['state']}</b>
+{div.get('note', '')}</p>
+<h2>Macro RS_STS%</h2>
+<p>{macro['name'] if macro else '—'}: <b>{pct(macro['pct']) if macro else '—'}</b>
+(macro group RS ranking)</p>
+<h2>Strongest sectors (RS_STS%)</h2>
+<table><tr><th>Sector</th><th>RS%</th><th>n</th></tr>{rows}</table>
+<h2>Weakest sectors</h2>
+<table><tr><th>Sector</th><th>RS%</th><th>n</th></tr>{bot}</table>
+<h2>New listings awaiting first ranking</h2>
+<p>{len(ipo)} stock(s): {', '.join(i['s'] for i in ipo[:12]) or 'none'}</p>
+<h2>Data provenance</h2>
+<p class="muted">{len(src)} date(s) not from Yahoo daily bars:
+{', '.join(f'{d} ({s})' for d, s in sorted(src.items())[:8]) or 'all Yahoo'}</p>
+"""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    return path
+
+
 def render_breadth_svg(dates, osc, n_stocks):
     if not osc or len(osc) < 2:
         return ('<div class="brdempty">Not enough price history cached for the breadth '
@@ -1656,11 +1832,12 @@ __BRD__
 # --------------------------------------------------------------------------- #
 #  JSON export for the FastAPI backend
 # --------------------------------------------------------------------------- #
-def save_rs_json(levels, breadth, meta, path):
+def save_rs_json(levels, breadth, meta, path, rotation=None):
     """Write precomputed RS data so the backend can serve it without recomputing."""
     data = {
         "meta": meta,
         "breadth": breadth if breadth else {"dates": [], "osc": [], "n": 0},
+        "rotation": rotation or {"dates": [], "groups": []},
         "levels": [],
     }
     gid = 0
@@ -1675,6 +1852,7 @@ def save_rs_json(levels, breadth, meta, path):
                     "p": round(m["pct"], 4),
                     "e": m.get("ema") or [-1] * len(EMA_PERIODS),
                     "b": m.get("rse", -1),
+                    "d": m.get("d"),
                     "l": round(m["ltp"], 2) if m.get("ltp") is not None else None,
                     "h": round(m["hi52"], 1) if m.get("hi52") is not None else None,
                     "a": round(m["adr"], 2) if m.get("adr") is not None else None,
@@ -1682,6 +1860,7 @@ def save_rs_json(levels, breadth, meta, path):
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
                 "n": it["n"], "pct": round(it["pct"], 4),
+                "dp": it.get("dp"),
                 "r": [round(x, 3) for x in it["rs"]],
                 "members": members_out,
             })
@@ -1859,7 +2038,9 @@ def main():
     try:
         bdates, bosc, bn = compute_breadth(universe, cache, breadth_dates)
         macros = compute_macro_breadth(universe, cache, breadth_dates)
-        breadth = {"dates": bdates, "osc": bosc, "n": bn, "macros": macros}
+        breadth = {"dates": bdates, "osc": bosc, "n": bn, "macros": macros,
+                   "divergence": detect_breadth_divergence(
+                       cache.get("__BENCH__", {}), bdates, bosc)}
         if bosc:
             print(f"Breadth oscillator: {len(bosc)} days "
                   f"({bdates[0]} → {bdates[-1]}), latest {bosc[-1]:+.1f} "
@@ -1882,6 +2063,32 @@ def main():
         print(f"Window coverage: {n_window}/{n_stocks} stocks. "
               f"{len(excluded)} not in the view (no full window data today): "
               f"{excluded[:12]}{' …' if len(excluded) > 12 else ''}")
+
+    # ---- Phase 4: ranking archive + daily deltas vs the previous snapshot ----
+    prev_snap = load_previous_snapshot()
+    window_end = ref_dates[-1] if ref_dates else ""
+    append_snapshot(levels, window_end)
+    # deltas only vs a genuinely EARLIER snapshot (same-day rebuilds show none)
+    if prev_snap and prev_snap.get("end") != window_end:
+        pg = prev_snap.get("g", {})
+        pm = prev_snap.get("m", {})
+        for key, _l, items in levels:
+            for it in items:
+                p = pg.get(key, {}).get(it["name"])
+                it["dp"] = round((it["pct"] - p) * 100, 1) if p is not None else None
+                for stock in it["members"]:
+                    q = pm.get(stock["sym"])
+                    stock["d"] = (round((stock["pct"] - q) * 100, 1)
+                                  if q is not None else None)
+
+    ipo = build_ipo_watch(universe, cache, set(excluded))
+    rotation = compute_rotation(universe, cache, cache.get("__BENCH__", {}),
+                                breadth_dates) if breadth_dates else \
+        {"dates": [], "groups": []}
+    if ipo:
+        print(f"IPO watch: {len(ipo)} new listing(s) awaiting their first "
+              f"{WINDOW}-day ranking: {[i['s'] for i in ipo[:8]]}")
+
     meta = {
         "drange": f"{ref_dates[0]} → {ref_dates[-1]}" if ref_dates else "n/a",
         "window_dates": ref_dates,
@@ -1890,13 +2097,17 @@ def main():
         "n_window": n_window,
         "excluded": excluded,
         "src": prov,
+        "ipo": ipo,
     }
     page = build_html(levels, meta, breadth)
     with open(OUT_HTML, "w", encoding="utf-8") as fh:
         fh.write(page)
     print(f"Wrote {OUT_HTML}")
-    save_rs_json(levels, breadth, meta, RS_DATA_JSON)
+    save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation)
     print(f"Wrote {RS_DATA_JSON}")
+    write_daily_report(os.path.join(HERE, "daily_report.html"),
+                       meta, breadth, levels, ipo)
+    print(f"Wrote {os.path.join(HERE, 'daily_report.html')}")
 
 
 if __name__ == "__main__":

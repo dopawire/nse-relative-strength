@@ -618,7 +618,7 @@ def test_cache_benchmark_recent_values_match_investing(price_cache):
 
 
 def test_rs_data_structure(rs_data):
-    assert set(rs_data) == {"meta", "breadth", "levels"}
+    assert set(rs_data) == {"meta", "breadth", "rotation", "levels"}
     assert rs_data["meta"]["n_stocks"] > 2000
     assert [l["key"] for l in rs_data["levels"]] == ["macro", "sector", "industry", "basic"]
     b = rs_data["breadth"]

@@ -93,12 +93,19 @@ def test_page_loads_without_js_errors(browser_page):
 
 def test_breadth_tab_renders_macro_dashboard(browser_page):
     page, errors = browser_page
-    page.query_selector_all(".tab")[-1].click()
+    page.query_selector('.tab[data-tab="breadth"]').click()
     page.wait_for_timeout(1500)
     assert errors == [], f"page errors: {errors}"
     assert page.query_selector("#brd-svg") is not None
     cards = page.query_selector_all(".macro-card")
     assert len(cards) >= 10, f"expected >=10 macro cards, got {len(cards)}"
+    # Phase-4 tabs render too
+    page.query_selector('.tab[data-tab="rotation"]').click()
+    page.wait_for_timeout(1500)
+    assert len(page.query_selector_all(".macro-card")) >= 5   # sector cards
+    page.query_selector('.tab[data-tab="ipo"]').click()
+    page.wait_for_timeout(800)
+    assert errors == [], f"page errors on new tabs: {errors}"
 
 
 def test_filters_present(browser_page):
@@ -168,7 +175,7 @@ def test_static_mode_renders_without_backend(static_server, browser):
     assert page.query_selector("#btn-refresh-stocks").is_hidden()
     assert page.query_selector(".static-tag") is not None
     # breadth tab with macro dashboard works statically too
-    page.query_selector_all(".tab")[-1].click()
+    page.query_selector('.tab[data-tab="breadth"]').click()
     page.wait_for_timeout(1500)
     assert len(page.query_selector_all(".macro-card")) >= 10
     assert errors == [], f"page errors after breadth: {errors}"

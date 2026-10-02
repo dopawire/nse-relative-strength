@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 
 from backend.models import (
     MetaResponse, LevelSummary, LevelResponse,
-    GroupOut, BreadthResponse,
+    GroupOut, BreadthResponse, RotationResponse, StockDetail,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +84,7 @@ def get_meta():
         "n_window": m.get("n_window", 0),
         "excluded": m.get("excluded", []),
         "src": m.get("src", {}),
+        "ipo": m.get("ipo", []),
     }
 
 
@@ -144,7 +145,65 @@ def get_breadth():
         "latest": osc[-1] if osc else 0.0,
         "span": f"{dates[0]} → {dates[-1]}" if dates else "",
         "macros": brd.get("macros", []),
+        "divergence": brd.get("divergence", {}),
     }
+
+
+# ---- Phase 4: rotation RS-lines + per-stock RS chart ----------------------- #
+
+_price_cache: dict | None = None
+
+
+def _prices():
+    """Lazy-load the raw price cache (needed for per-stock RS lines)."""
+    global _price_cache
+    if _price_cache is None:
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        import build_rs
+        try:
+            with open(build_rs.PRICE_CACHE) as fh:
+                _price_cache = json.load(fh)
+        except Exception:
+            _price_cache = {}
+    return _price_cache
+
+
+@app.get("/api/rotation", response_model=RotationResponse)
+def get_rotation():
+    """Full-history RS lines per sector group (rotation view)."""
+    _check_ready()
+    r = _data.get("rotation") or {}
+    return {"dates": r.get("dates", []), "groups": r.get("groups", [])}
+
+
+@app.get("/api/stock/{sym}", response_model=StockDetail)
+def get_stock(sym: str):
+    """Per-stock RS line (stock / NIFTY 500) + its 21-day EMA — the
+    TradingView-style chart — computed on demand from the price cache."""
+    _check_ready()
+    cache = _prices()
+    ser = cache.get(sym)
+    bench = cache.get("__BENCH__", {})
+    if not ser or not bench:
+        raise HTTPException(404, f"unknown symbol: {sym}")
+    days = [d for d in sorted(ser) if d in bench][-125:]
+    if not days:
+        raise HTTPException(404, f"no benchmark overlap for: {sym}")
+    rs = [ser[d] / bench[d] for d in days]
+    k = 2.0 / 22
+    ema = [rs[0]]
+    for v in rs[1:]:
+        ema.append(v * k + ema[-1] * (1 - k))
+    name = ""
+    for lv in _data.get("levels", []):
+        for g in lv.get("groups", []):
+            for m in g.get("members", []):
+                if m["s"] == sym:
+                    name = m["n"]
+    return {"sym": sym, "name": name, "dates": days, "rs": rs,
+            "ema21": ema, "ltp": ser[days[-1]],
+            "rse": 1 if rs[-1] >= ema[-1] else 0}
 
 
 @app.post("/api/reload")

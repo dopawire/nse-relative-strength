@@ -19,6 +19,9 @@
     adrFilter: { on: false, min: 3 },
     rsFilter: { on: false, min: 80 },
     rseFilter: false,
+    watchlist: loadWatchlist(),   // localStorage star list
+    watchlistOnly: false,
+    rotationData: null,   // cached rotation RS-lines
     selected: new Set(), // selected symbols for TradingView export
     breadthData: null,   // cached breadth oscillator data
     theme: 'dark',
@@ -60,6 +63,7 @@
       n_window: m.n_window || 0,
       excluded: m.excluded || [],
       src: m.src || {},
+      ipo: m.ipo || [],
     };
   }
 
@@ -72,6 +76,7 @@
       latest: b.osc.length ? b.osc[b.osc.length - 1] : 0.0,
       span: b.dates.length ? `${b.dates[0]} → ${b.dates[b.dates.length - 1]}` : '',
       macros: b.macros || [],
+      divergence: b.divergence || {},
     };
   }
 
@@ -109,6 +114,11 @@
     },
     async breadth() {
       return staticData ? staticBreadth() : api.get('/api/breadth');
+    },
+    async rotation() {
+      return staticData
+        ? (staticData.rotation || { dates: [], groups: [] })
+        : api.get('/api/rotation');
     },
   };
 
@@ -206,10 +216,10 @@
   function activateTab(tab) {
     state.activeTab = tab;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    // Show/hide toolbars for breadth vs level tabs
-    const isBreadth = tab === 'breadth';
-    $.toolbarSection.style.display = isBreadth ? 'none' : '';
-    $.note.style.display = isBreadth ? 'none' : '';
+    // Show/hide toolbars: filters apply to level tables only
+    const isLevel = !['breadth', 'rotation', 'ipo'].includes(tab);
+    $.toolbarSection.style.display = isLevel ? '' : 'none';
+    $.note.style.display = isLevel ? '' : 'none';
     renderTab(tab);
   }
 
@@ -226,6 +236,14 @@
 
     if (tab === 'breadth') {
       await renderBreadth();
+      return;
+    }
+    if (tab === 'rotation') {
+      await renderRotation();
+      return;
+    }
+    if (tab === 'ipo') {
+      renderIpo();
       return;
     }
 
@@ -267,7 +285,7 @@
   // =========================================================================
   function renderLevelTable(tab, data) {
     const q = ($.searchInput.value || '').trim().toLowerCase();
-    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter;
+    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
 
     let groups = data.groups || [];
 
@@ -306,7 +324,7 @@
       rows += `<td class="nm"><input type="checkbox" class="gpick" title="select all stocks in this group">`;
       rows += `<span class="car">▶</span>${nm}<span class="cnt">${filtering ? filteredMembers.length : g.n}</span></td>`;
       rows += `<td class="sp">${spark}</td>`;
-      rows += `<td class="pc"><span class="rs-pct" style="${bg}">${utils.fmtPct(g.pct)}</span></td>`;
+      rows += `<td class="pc"><span class="rs-pct" style="${bg}">${utils.fmtPct(g.pct)}</span>${g.dp != null ? `<span class="delta ${g.dp >= 0 ? 'up' : 'dn'}">${g.dp >= 0 ? '+' : ''}${g.dp.toFixed(0)}</span>` : ''}</td>`;
       rows += `</tr>`;
 
       // Sub-row for members (lazy)
@@ -359,6 +377,9 @@
     }
     if (state.rseFilter) {
       if (m.b !== 1) return false;
+    }
+    if (state.watchlistOnly) {
+      if (!state.watchlist.has(m.s)) return false;
     }
     return true;
   }
@@ -415,7 +436,7 @@
     }
 
     const q = ($.searchInput.value || '').trim().toLowerCase();
-    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter;
+    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
     const gmatch = q && (body.dataset.name || '').toLowerCase().includes(q);
 
     let visibleMembers = members;
@@ -438,9 +459,13 @@
         : (m.b === 0
           ? '<td class="mrse"><span class="rse-badge dn">below</span></td>'
           : '<td class="mrse"><span class="rse-badge na">—</span></td>');
-      mrows += `<tr>
+      const star = state.watchlist.has(m.s) ? '★' : '☆';
+      const dBadge = (m.d != null)
+        ? `<span class="delta ${m.d >= 0 ? 'up' : 'dn'}">${m.d >= 0 ? '+' : ''}${m.d.toFixed(0)}</span>`
+        : '';
+      mrows += `<tr data-sym="${utils.esc(m.s)}">
         <td class="mck"><input type="checkbox" class="pick" data-sym="${utils.esc(m.s)}"${ck}></td>
-        <td class="mnm">${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span></td>
+        <td class="mnm"><button class="wstar${state.watchlist.has(m.s) ? ' on' : ''}" data-sym="${utils.esc(m.s)}" title="watchlist">${star}</button>${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span>${dBadge}</td>
         <td class="msp">${spark}</td>
         <td class="mpc"><span class="rs-pct" style="${bg}">${utils.fmtPct(m.p)}</span></td>
         <td class="mlt tnum">${utils.fmtPrice(m.l)}</td>
@@ -584,6 +609,7 @@
       <div class="brd-head">NSE Market Breadth Oscillator
         <span> · McClellan-style: 19- vs 39-day EMA of ratio-adjusted (advancers − decliners) across ${n} stocks · ${span}</span>
       </div>
+      ${divergenceBanner(data.divergence)}
       <div class="brd-scroll" id="brd-scroll">
         ${svg}
         <div class="brd-tip" id="brd-tip"></div>
@@ -596,6 +622,13 @@
   }
 
   // ---- Data provenance (which dates came from something other than Yahoo) ----
+  function divergenceBanner(div) {
+    if (!div || !div.state || div.state === 'none') return '';
+    const bear = div.state === 'bearish';
+    return `<div class="div-warn ${bear ? 'bear' : 'bull'}">
+      <b>${bear ? 'Bearish divergence' : 'Bullish divergence'}</b> — ${utils.esc(div.note || '')}</div>`;
+  }
+
   function provenanceHTML() {
     const src = (state.meta && state.meta.src) || {};
     const dates = Object.keys(src).sort();
@@ -777,22 +810,295 @@
   }
 
   // =========================================================================
+  // PHASE 4: ROTATION TAB, NEW LISTINGS, STOCK RS CHART, WATCHLIST, CSV
+  // =========================================================================
+  function renderRotation() {
+    if (state.rotationData) return drawRotation(state.rotationData);
+    $.content.innerHTML = '<div class="loading">Loading</div>';
+    api.rotation().then(data => {
+      state.rotationData = data;
+      drawRotation(data);
+    }).catch(e => {
+      $.content.innerHTML = `<div class="brd-empty">Failed to load rotation data: ${e.message}</div>`;
+    });
+  }
+
+  function drawRotation(data) {
+    const dates = data.dates || [];
+    const groups = data.groups || [];
+    if (!groups.length) {
+      $.content.innerHTML = '<div class="brd-empty">No rotation data yet — run a build.</div>';
+      return;
+    }
+    const cards = groups.map((g, i) => {
+      const rs = g.rs;
+      const total = ((rs[rs.length - 1] / rs[0]) - 1) * 100;
+      const pos = total >= 0;
+      return `<div class="macro-card">
+        <div class="mhead">
+          <span class="mname">${utils.esc(g.name)}</span>
+          <span class="mbadges">
+            <span class="mbadge ${pos ? 'up' : 'dn'}">${pos ? '+' : ''}${total.toFixed(1)}%</span>
+          </span>
+        </div>
+        <div class="mplot">${lineChartSVG(rs, null, 'rot-' + i, 340, 140)}
+          <div class="mtip" id="rot-tip-${i}"></div></div>
+      </div>`;
+    }).join('');
+    $.content.innerHTML = `<div class="mbrd-head">Sector rotation — RS vs NIFTY 500
+      <span> · chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 at ${dates[0] || 'start'} · hover for values</span></div>
+      <div class="macro-grid">${cards}</div>`;
+    groups.forEach((g, i) => {
+      bindLineChart('rot-' + i, dates, g.rs, null, document.getElementById('rot-tip-' + i));
+    });
+  }
+
+  function renderIpo() {
+    const ipo = (state.meta && state.meta.ipo) || [];
+    const win = ((state.meta && state.meta.window_dates) || []).length || 26;
+    if (!ipo.length) {
+      $.content.innerHTML = '<div class="brd-empty">No new listings awaiting ranking right now.</div>';
+      return;
+    }
+    const rows = ipo.map(i => `<tr class="ipo-row" data-sym="${utils.esc(i.s)}">
+        <td class="mnm">${utils.esc(i.n)}<span class="msym">${utils.esc(i.s)}</span></td>
+        <td class="tnum">${i.first}</td>
+        <td class="tnum">${i.days}</td>
+        <td class="tnum">${utils.fmtPrice(i.ltp)}</td>
+        <td class="tnum">${i.eta} day${i.eta === 1 ? '' : 's'}</td>
+      </tr>`).join('');
+    $.content.innerHTML = `<div class="mbrd-head">New listings — awaiting first ${win}-day ranking
+      <span> · stocks appear in the RS tables once they have a full window of prices · click a name for its RS chart</span></div>
+      <table class="ipo-table"><thead><tr>
+        <th>Stock</th><th>Listed</th><th>Days</th><th>LTP</th><th>Ranked in</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+    $.content.querySelectorAll('.ipo-row').forEach(r => {
+      r.addEventListener('click', () => openStockModal(r.dataset.sym));
+    });
+  }
+
+  // ---- Stock RS line chart (TradingView-style: ratio + EMA21) ----
+  function lineChartSVG(vals, ema, uid, W, H) {
+    const L = 8, R = 52, T = 10, B = 14;
+    const ph = H - T - B, pw = W - L - R;
+    const step = Math.max(1, Math.floor(vals.length / 100));   // downsample
+    const idx = [];
+    for (let k = 0; k < vals.length; k += step) idx.push(k);
+    if (idx[idx.length - 1] !== vals.length - 1) idx.push(vals.length - 1);
+    const v = idx.map(k => vals[k]);
+    const e = ema ? idx.map(k => ema[k]) : null;
+    const all = e ? v.concat(e) : v;
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.02 || 0.01;
+    const y0 = lo - pad, y1 = hi + pad;
+    const n = v.length;
+    const X = k => L + pw * k / (n - 1);
+    const Y = x => T + ph * (1 - (x - y0) / (y1 - y0));
+    const seg = (arr, col, w) => {
+      let p = '';
+      for (let k = 1; k < arr.length; k++) {
+        p += `<line x1="${X(k - 1).toFixed(1)}" y1="${Y(arr[k - 1]).toFixed(1)}" x2="${X(k).toFixed(1)}" y2="${Y(arr[k]).toFixed(1)}" stroke="${col}" stroke-width="${w}"/>`;
+      }
+      return p;
+    };
+    const blue = state.theme === 'dark' ? '#60a5fa' : '#2563eb';
+    const amber = state.theme === 'dark' ? '#fbbf24' : '#b45309';
+    const muted = state.theme === 'dark' ? '#9ca3af' : '#7a8794';
+    const p = [];
+    if (y0 < 1 && y1 > 1) {
+      p.push(`<line x1="${L}" y1="${Y(1).toFixed(1)}" x2="${L + pw}" y2="${Y(1).toFixed(1)}" stroke="${muted}" stroke-width="1" stroke-dasharray="4 4" opacity="0.6"/>`);
+    }
+    p.push(seg(v, blue, 1.5));
+    if (e) p.push(seg(e, amber, 1.2));
+    p.push(`<text x="${L + pw + 4}" y="${Y(y1) + 3}" font-size="9" fill="${muted}">${y1.toFixed(2)}</text>`);
+    p.push(`<text x="${L + pw + 4}" y="${Y(y0) + 3}" font-size="9" fill="${muted}">${y0.toFixed(2)}</text>`);
+    p.push(`<line id="${uid}-cross" x1="0" y1="${T}" x2="0" y2="${T + ph}" stroke="${muted}" stroke-width="1" stroke-dasharray="3 3" style="visibility:hidden"/>`);
+    p.push(`<circle id="${uid}-dot" r="3" fill="${state.theme === 'dark' ? '#e8eaf0' : '#111'}" style="visibility:hidden"/>`);
+    return `<svg id="${uid}" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="mbrd-svg"
+      data-step="${step}" data-n="${vals.length}">${p.join('')}</svg>`;
+  }
+
+  function bindLineChart(uid, dates, vals, ema, tip) {
+    const svg = document.getElementById(uid);
+    if (!svg || !tip) return;
+    const W = +svg.getAttribute('width'), H = +svg.getAttribute('height');
+    const step = +svg.dataset.step, n0 = +svg.dataset.n;
+    const L = 8, R = 52, T = 10, B = 14;
+    const ph = H - T - B, pw = W - L - R;
+    const idx = [];
+    for (let k = 0; k < n0; k += step) idx.push(k);
+    if (idx[idx.length - 1] !== n0 - 1) idx.push(n0 - 1);
+    const v = idx.map(k => vals[k]);
+    const e = ema ? idx.map(k => ema[k]) : null;
+    const all = e ? v.concat(e) : v;
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.02 || 0.01;
+    const y0 = lo - pad, y1 = hi + pad;
+    const n = v.length;
+    const X = k => L + pw * k / (n - 1);
+    const Y = x => T + ph * (1 - (x - y0) / (y1 - y0));
+    const cross = svg.querySelector('line[id$="-cross"]');
+    const dot = svg.querySelector('circle[id$="-dot"]');
+    const fmtD = s => {
+      const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const a = s.split('-');
+      return a[2] + ' ' + m[+a[1] - 1] + ' ' + a[0];
+    };
+    svg.addEventListener('mousemove', function (ev) {
+      const r = svg.getBoundingClientRect();
+      const x = (ev.clientX - r.left) * (W / r.width);
+      let k = Math.round((x - L) / pw * (n - 1));
+      if (k < 0) k = 0; if (k >= n) k = n - 1;
+      const px = X(k), py = Y(v[k]);
+      cross.setAttribute('x1', px); cross.setAttribute('x2', px);
+      cross.style.visibility = 'visible';
+      dot.setAttribute('cx', px); dot.setAttribute('cy', py);
+      dot.style.visibility = 'visible';
+      const raw = idx[k];
+      tip.innerHTML = `<b>${fmtD(dates[raw])}</b>${v[k].toFixed(4)}` +
+        (e ? `<i class="tip-ema">${e[k].toFixed(4)}</i>` : '');
+      tip.style.visibility = 'visible';
+      const tipW = tip.offsetWidth;
+      const plotW = svg.parentNode.clientWidth;
+      let left = (ev.clientX - r.left) - tipW / 2;
+      left = Math.max(2, Math.min(left, plotW - tipW - 2));
+      tip.style.left = left + 'px';
+      tip.style.top = (py * (r.height / H) - 30) + 'px';
+    });
+    svg.addEventListener('mouseleave', function () {
+      cross.style.visibility = 'hidden';
+      dot.style.visibility = 'hidden';
+      tip.style.visibility = 'hidden';
+    });
+  }
+
+  // ---- Stock detail modal ----
+  function findMember(sym) {
+    for (const lv of Object.values(state.levelData)) {
+      if (!lv || !lv.groups) continue;
+      for (const g of lv.groups) {
+        const m = (g.members || []).find(x => x.s === sym);
+        if (m) return m;
+      }
+    }
+    return null;
+  }
+
+  function lookupName(sym) {
+    const m = findMember(sym);
+    if (m) return m.n;
+    const ipo = (state.meta && state.meta.ipo) || [];
+    const i = ipo.find(x => x.s === sym);
+    return i ? i.n : sym;
+  }
+
+  function openStockModal(sym) {
+    const modal = document.getElementById('stock-modal');
+    const name = lookupName(sym);
+    const m = findMember(sym);
+    modal.classList.add('open');
+    modal.querySelector('.sm-name').textContent = name === sym ? sym : `${name} — ${sym}`;
+    const plot = modal.querySelector('.sm-plot');
+    plot.innerHTML = '<div class="loading">Loading</div>';
+    api.get('/api/stock/' + encodeURIComponent(sym)).then(d => {
+      plot.innerHTML = `<div class="sm-legend"><span class="lg-rs">RS line (stock ÷ NIFTY 500)</span><span class="lg-ema">EMA21</span><span class="sm-ltp">LTP ${utils.fmtPrice(d.ltp)} · ${d.rse === 1 ? 'above' : 'below'} EMA21</span></div>
+        ${lineChartSVG(d.rs, d.ema21, 'sm-chart', 700, 260)}
+        <div class="mtip sm-tip" id="sm-tip"></div>`;
+      bindLineChart('sm-chart', d.dates, d.rs, d.ema21, document.getElementById('sm-tip'));
+    }).catch(() => {
+      if (m && m.r) {
+        plot.innerHTML = `<div class="sm-legend"><span class="lg-rs">26-day RS window</span><span class="sm-ltp">full chart needs the local server</span></div>
+          ${lineChartSVG(m.r, null, 'sm-chart', 700, 220)}
+          <div class="mtip sm-tip" id="sm-tip"></div>`;
+        bindLineChart('sm-chart', (state.meta.window_dates || m.r.map((_, i) => 'd' + i)), m.r, null,
+          document.getElementById('sm-tip'));
+      } else {
+        plot.innerHTML = '<div class="brd-empty">Chart unavailable</div>';
+      }
+    });
+  }
+
+  function closeStockModal() {
+    document.getElementById('stock-modal').classList.remove('open');
+  }
+
+  // ---- Watchlist (localStorage) ----
+  function loadWatchlist() {
+    try { return new Set(JSON.parse(localStorage.getItem('rs_watchlist') || '[]')); }
+    catch (e) { return new Set(); }
+  }
+
+  function toggleWatchlist(sym) {
+    if (state.watchlist.has(sym)) state.watchlist.delete(sym);
+    else state.watchlist.add(sym);
+    localStorage.setItem('rs_watchlist', JSON.stringify([...state.watchlist]));
+    document.querySelectorAll(`.wstar[data-sym="${CSS.escape(sym)}"]`).forEach(b => {
+      b.classList.toggle('on', state.watchlist.has(sym));
+      b.textContent = state.watchlist.has(sym) ? '★' : '☆';
+    });
+  }
+
+  // ---- CSV export of the current level tab ----
+  function exportCSV() {
+    const tab = state.activeTab;
+    const data = state.levelData[tab];
+    if (!data || !data.groups) { flashMsg('Nothing to export'); return; }
+    const q = ($.searchInput.value || '').trim().toLowerCase();
+    const filtering = q || state.emaFilter.size || state.hiFilter.on ||
+      state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
+    const head = ['level', 'group', 'group_n', 'group_rs_pct', 'group_delta',
+      'symbol', 'name', 'rs_pct', 'delta', 'ltp', 'ema20', 'ema50', 'ema100',
+      'ema150', 'ema200', 'off_high_pct', 'adr_pct', 'rs_ema21'];
+    const lines = [head.join(',')];
+    const esc = s => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
+    for (const g of data.groups) {
+      const members = filtering
+        ? (g.members || []).filter(m => memberPasses(m, q, q && g.name.toLowerCase().includes(q)))
+        : (g.members || []);
+      for (const m of members) {
+        lines.push([tab, g.name, g.n, (g.pct * 100).toFixed(1),
+          g.dp != null ? g.dp.toFixed(1) : '', m.s, m.n, (m.p * 100).toFixed(1),
+          m.d != null ? m.d.toFixed(1) : '', m.l, ...(m.e || []), m.h, m.a,
+          m.b === 1 ? 'above' : (m.b === 0 ? 'below' : '')].map(esc).join(','));
+      }
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `nse_rs_${tab}_${(state.meta.gen || '').split(' ')[0] || 'export'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    flashMsg('CSV downloaded');
+  }
+
+  // =========================================================================
   // TABLE EVENTS
   // =========================================================================
   function bindTableEvents() {
     const table = document.getElementById('level-table');
     if (!table) return;
 
-    // Group row click → expand/collapse
+    // Group row click → expand/collapse · member name → stock chart · star → watchlist
     table.addEventListener('click', function (e) {
+      const star = e.target.closest('.wstar');
+      if (star) {
+        e.stopPropagation();
+        toggleWatchlist(star.dataset.sym);
+        return;
+      }
       // Don't toggle when clicking checkboxes
       if (e.target.tagName === 'INPUT') return;
 
       const grp = e.target.closest('tr.grp');
-      if (!grp) return;
-
-      const body = grp.parentNode;
-      expandGroup(body);
+      if (grp) {
+        const body = grp.parentNode;
+        expandGroup(body);
+        return;
+      }
+      const mrow = e.target.closest('tr[data-sym]');
+      if (mrow) openStockModal(mrow.dataset.sym);
     });
 
     // Sort on header click
@@ -837,7 +1143,7 @@
           const members = getGroupMembersSync(gid) || [];
           // Apply current filter
           const q = ($.searchInput.value || '').trim().toLowerCase();
-          const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter;
+          const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
           const gmatch = q && (body.dataset.name || '').toLowerCase().includes(q);
           pickList = members
             .filter(m => !filtering || memberPasses(m, q, gmatch))
@@ -892,7 +1198,7 @@
 
     // Also cover unexpanded groups: read from cached member data, filtered
     const q = ($.searchInput.value || '').trim().toLowerCase();
-    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter;
+    const filtering = q || state.emaFilter.size || state.hiFilter.on || state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
     table.querySelectorAll('tbody.gb').forEach(body => {
       const sub = body.querySelector('tr.sub');
       if (!sub.classList.contains('hide')) return; // already handled above (expanded)
@@ -1062,6 +1368,7 @@
     if (state.adrFilter.on) bits.push('ADR≥' + state.adrFilter.min + '%');
     if (state.rsFilter.on) bits.push('RS≥' + state.rsFilter.min + '%');
     if (state.rseFilter) bits.push('RS>EMA21');
+    if (state.watchlistOnly) bits.push('★ watchlist');
     $.filterInfo.textContent = bits.join(' · ');
   }
 
@@ -1238,6 +1545,8 @@
       tabHTML += `<button class="tab" data-tab="${lv.key}">${lv.label} <span class="badge">${lv.n_groups}</span></button>`;
     }
     tabHTML += '<button class="tab" data-tab="breadth">Market Breadth</button>';
+    tabHTML += '<button class="tab" data-tab="rotation">Rotation</button>';
+    tabHTML += '<button class="tab" data-tab="ipo">New Listings</button>';
     $.tabBar.innerHTML = tabHTML;
 
     // Tab click handlers
@@ -1248,6 +1557,23 @@
     // Toolbar events
     bindToolbarEvents();
     bindActionButtons();
+
+    // Phase-4 events: CSV export, watchlist chip, stock modal
+    document.getElementById('btn-csv').addEventListener('click', exportCSV);
+    const watchTog = document.getElementById('watch-tog');
+    watchTog.addEventListener('click', function () {
+      state.watchlistOnly = !state.watchlistOnly;
+      watchTog.classList.toggle('on', state.watchlistOnly);
+      updateFilterInfo();
+      refreshCurrentView();
+    });
+    document.getElementById('modal-close').addEventListener('click', closeStockModal);
+    document.getElementById('stock-modal').addEventListener('click', function (e) {
+      if (e.target === this) closeStockModal();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeStockModal();
+    });
 
     // Route to the correct tab from URL hash
     const initialTab = getHashTab();

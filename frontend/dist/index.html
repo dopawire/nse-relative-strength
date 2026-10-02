@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;650;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="app.css?v=9">
+<link rel="stylesheet" href="app.css?v=10">
 </head>
 <body>
 <div class="app-shell">
@@ -86,6 +86,7 @@
       <label class="filter-chip rse" id="rse-chip">
         <input type="checkbox" id="rse-on"> RS above EMA21
       </label>
+      <button class="ema-tog" id="watch-tog" title="show only watchlisted stocks">★ Watchlist</button>
       <span class="filter-info" id="filter-info"></span>
     </div>
     <div class="sel-row" id="sel-row">
@@ -94,6 +95,7 @@
       <button class="btn" id="sel-clear">Clear</button>
       <button class="btn primary" id="btn-copy">Copy for TradingView</button>
       <button class="btn primary" id="btn-dl">Download .txt</button>
+      <button class="btn primary" id="btn-csv">Export CSV</button>
       <span class="flash-msg" id="flash"></span>
     </div>
   </div>
@@ -105,6 +107,12 @@
     excluded from the view. Click a group to expand its stocks; click a column header to sort.
   </p>
 </div>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
+<div class="modal" id="stock-modal">
+  <div class="modal-card">
+    <div class="modal-head"><span class="sm-name"></span><button class="modal-close" id="modal-close" title="close">✕</button></div>
+    <div class="sm-plot"></div>
+  </div>
+</div>
 </body>
 </html>

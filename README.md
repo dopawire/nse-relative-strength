@@ -17,10 +17,16 @@ with:
 - Per-stock: RS sparkline, `RS_STS%`, LTP, EMA20/50/100/150/200 flags, the
   **RS line vs its 21-day EMA** (above/below), % off 52-week high, ADR%.
 - Filters: search, price-above-EMA, %-off-high, ADR, **RS ≥ N%**, **RS above
-  EMA21** — combined with a TradingView watchlist export.
+  EMA21**, **★ watchlist** — combined with TradingView / **CSV export**.
+- Per-stock **RS line + EMA21 chart** (TradingView-style) — click any stock.
+- Daily **RS_STS% deltas** vs the previous snapshot, per group and stock.
 - **Market Breadth** oscillator (advancers − decliners, RANA-based), plus a
   **per-macro breadth dashboard** — the same oscillator computed for each of
-  the 12 macro groups as a card grid with hover tooltips and RS% badges.
+  the macro groups as a card grid with hover tooltips and RS% badges, and
+  **divergence alerts** (index at highs while breadth fades, and the reverse).
+- **Rotation** tab — full-history RS lines per sector vs NIFTY 500.
+- **New Listings** tab — IPOs awaiting their first 26-day ranking.
+- A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method
 
@@ -111,7 +117,7 @@ python3 refresh_classification.py --headful  # show the browser window
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/ -q          # all (61)
+.venv/bin/python -m pytest tests/ -q          # all (71)
 .venv/bin/python -m pytest tests/ -q -m smoke # frontend smoke only
 NO_BROWSER=1 .venv/bin/python -m pytest tests/ -q   # skip browser tests
 .venv/bin/python audit_data.py                # daily data health check
