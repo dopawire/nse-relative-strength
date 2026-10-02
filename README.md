@@ -117,9 +117,10 @@ python3 refresh_classification.py --headful  # show the browser window
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/ -q          # all (71)
+.venv/bin/python -m pytest tests/ -q          # all (82)
 .venv/bin/python -m pytest tests/ -q -m smoke # frontend smoke only
 NO_BROWSER=1 .venv/bin/python -m pytest tests/ -q   # skip browser tests
+.venv/bin/python -m ruff check .              # lint (also runs in CI)
 .venv/bin/python audit_data.py                # daily data health check
 ```
 
@@ -139,6 +140,16 @@ pip install -r requirements.txt
 playwright install chromium       # only needed for refresh_classification.py
 python3 build_rs.py               # initial build
 ```
+
+## Configuration & layout
+
+- `config.toml` — optional tunables (window size, benchmark symbol, EMA
+  periods, fetch ranges…).  Delete it to use the built-in defaults.
+- `nse_holidays.csv` — the official NSE trading-holiday calendar used by the
+  build and the audit.
+- `rs_engine/` — computation core (config, RS maths, breadth, rotation,
+  snapshots, digest, HTML render); `build_rs.py` holds the data layer
+  (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.
 
 ## Notes
 

@@ -16,7 +16,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests fastapi "uvicorn[standard]" pytest
+        run: pip install requests fastapi "uvicorn[standard]" pytest ruff
+
+      - name: Lint
+        run: ruff check .
 
       - name: Unit + integration tests
         # NO_BROWSER=1: skip the Playwright smoke tests (no display/caches in CI)

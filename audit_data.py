@@ -61,8 +61,7 @@ def check_benchmark_calendar(cache):
                                   f"{cov}/{len(have)} stocks have data")
             elif iso in bench_set and rs.is_holiday(iso):
                 if cov >= thresh * 0.5:
-                    issues.append(f"{iso}: in benchmark but it's an NSE "
-                                  f"holiday ({rs.load_holidays()})")
+                    issues.append(f"{iso}: in benchmark but it's an NSE holiday")
         d += dt.timedelta(days=1)
     return issues
 

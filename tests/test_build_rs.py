@@ -196,7 +196,8 @@ def test_repair_skips_calendar_holiday(monkeypatch, tmp_path):
 
 
 def test_fetch_bhavcopy_parses_new_format(monkeypatch):
-    import io as _io, zipfile as _zipfile
+    import io as _io
+    import zipfile as _zipfile
     csv_text = ("SYMBOL,SERIES,HIGH_PRICE,LOW_PRICE,CLOSE_PRICE\n"
                 "RELIANCE,EQ,1291.5,1280,1287\n"
                 "TCS,EQ,2260,2230,2250\n"
@@ -213,7 +214,8 @@ def test_fetch_bhavcopy_parses_new_format(monkeypatch):
 
 
 def test_fetch_bhavcopy_legacy_columns(monkeypatch):
-    import io as _io, zipfile as _zipfile
+    import io as _io
+    import zipfile as _zipfile
     csv_text = "SYMBOL,SERIES,HIGH,LOW,CLOSE\nRELIANCE,EQ,1291.5,1280,1287\n"
     buf = _io.BytesIO()
     with _zipfile.ZipFile(buf, "w") as z:
@@ -225,7 +227,8 @@ def test_fetch_bhavcopy_legacy_columns(monkeypatch):
 
 def test_fetch_bhavcopy_modern_camelcase_columns(monkeypatch):
     """NSE's modernized bhavcopy schema (2024+) — the one actually served now."""
-    import io as _io, zipfile as _zipfile
+    import io as _io
+    import zipfile as _zipfile
     csv_text = ("TradDt,TckrSymb,SctySrs,FinInstrmTp,HghPric,LwPric,ClsPric\n"
                 "2026-10-01,RELIANCE,EQ,STK,1183.9,1160.8,1167.7\n"
                 "2026-10-01,SGBJUN28,GB,STK,90,89,89.5\n"          # non-equity series
@@ -620,7 +623,7 @@ def test_cache_benchmark_recent_values_match_investing(price_cache):
 def test_rs_data_structure(rs_data):
     assert set(rs_data) == {"meta", "breadth", "rotation", "levels"}
     assert rs_data["meta"]["n_stocks"] > 2000
-    assert [l["key"] for l in rs_data["levels"]] == ["macro", "sector", "industry", "basic"]
+    assert [lv["key"] for lv in rs_data["levels"]] == ["macro", "sector", "industry", "basic"]
     b = rs_data["breadth"]
     assert len(b["dates"]) == len(b["osc"]) > 400
     assert all(isinstance(o, (int, float)) for o in b["osc"])
@@ -690,7 +693,6 @@ def test_macro_breadth_math(price_cache, rs_data):
     for u in universe:
         u["sym"] = u["symbol"]
         u["macro"] = u.get("macro") or ""
-    dates = rs_data["breadth"]["dates"]
     # covered_dates for compute_macro_breadth = dates + warm-up (39 trimmed at start)
     # reconstruct the full covered list from the caches
     cov = {}

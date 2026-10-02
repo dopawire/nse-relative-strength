@@ -1,9 +1,7 @@
 """Tests for Phase-4 engine: rotation RS-lines, breadth divergence, IPO watch,
 ranking snapshots + deltas, daily report."""
-import json
 import datetime as dt
 
-import pytest
 
 import build_rs
 from build_rs import (
@@ -87,7 +85,9 @@ def test_ipo_watch_lists_only_unrankable_excluded():
 
 
 def test_snapshot_roundtrip_and_idempotency(tmp_path, monkeypatch):
-    monkeypatch.setattr(build_rs, "SNAPSHOTS", str(tmp_path / "snaps.jsonl"))
+    import rs_engine.snapshot
+    monkeypatch.setattr(rs_engine.snapshot, "SNAPSHOTS",
+                        str(tmp_path / "snaps.jsonl"))
     levels = [("macro", "Macro", [
         {"name": "Tech", "pct": 0.8, "members": [{"sym": "AAA", "pct": 0.9}]},
     ])]
@@ -99,7 +99,7 @@ def test_snapshot_roundtrip_and_idempotency(tmp_path, monkeypatch):
     # same window end → no new line
     append_snapshot(levels, "2026-10-01")
     with open(tmp_path / "snaps.jsonl") as f:
-        assert len([l for l in f if l.strip()]) == 1
+        assert len([ln for ln in f if ln.strip()]) == 1
 
 
 def test_daily_report_written(tmp_path):

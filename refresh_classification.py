@@ -105,7 +105,8 @@ def fetch_equity_list_via_browser(page):
 def parse_equity_text(text):
     rows = {}
     for row in csv.DictReader(io.StringIO(text)):
-        g = lambda k: (row.get(k) or next((row[c] for c in row if c.strip() == k), "")).strip()
+        def g(k):
+            return (row.get(k) or next((row[c] for c in row if c.strip() == k), "")).strip()
         sym = g("SYMBOL").upper()
         if sym:
             rows[sym] = {"symbol": sym, "company": g("NAME OF COMPANY"),

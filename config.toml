@@ -1,0 +1,15 @@
+# NSE Relative-Strength — tunable configuration.
+# All keys optional; remove this file to use the built-in defaults.
+# Loaded by rs_engine/config.py (section [rs]).
+
+[rs]
+window = 26                 # RS window in trading days (matches the sheet)
+full_range = "2y"           # history depth of a full price fetch
+append_range = "1mo"        # incremental daily top-up range
+min_bars = 200              # below this a symbol is refetched with full_range
+ema_periods = [20, 50, 100, 150, 200]   # price-EMA flags + "price above EMA" filter
+adr_period = 20             # ADR% lookback (Qullamaggie 20-day)
+corp_action_jump = 0.40     # single-day move beyond this = corporate action, not trading
+benchmark = "NIFTY 500"     # display name of the benchmark
+bench_symbol = "^CRSLDX"    # Yahoo ticker of the benchmark
+yahoo_workers = 8           # concurrent Yahoo fetches

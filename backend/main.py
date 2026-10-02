@@ -246,7 +246,7 @@ def _run_script(args: list[str], task_name: str):
     with _pipeline_lock:
         _pipeline["running"] = False
         _pipeline["task"] = None
-        _pipeline["last_result"] = "ok" if ok else f"failed"
+        _pipeline["last_result"] = "ok" if ok else "failed"
         _pipeline["last_output"] = out.strip()
         _pipeline["finished_at"] = dt.datetime.now().isoformat(timespec="seconds")
 

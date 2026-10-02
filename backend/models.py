@@ -28,7 +28,7 @@ class MemberOut(BaseModel):
     e: list[int]         # EMA flags [-1,0,1] × 5
     b: int               # RS line vs its EMA21: 1=above, 0=below, -1=n/a
     d: float | None = None   # RS_STS% change vs previous snapshot (pp)
-    l: float | None      # last traded price
+    l: float | None = None  # noqa: E741 — last traded price (data key 'l')
     h: float | None      # % off 52-week high
     a: float | None      # ADR%
 
