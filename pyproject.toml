@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff", "playwright"]
+dev = ["pytest", "ruff", "playwright", "httpx"]
 
 [tool.ruff]
 line-length = 100
