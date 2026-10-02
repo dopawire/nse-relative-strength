@@ -50,7 +50,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               APPEND_RANGE, MIN_BARS, EMA_PERIODS, BENCHMARK_NAME, BENCH_YSYM,
                               YH_WORKERS, IST, is_holiday)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
-                             rs_line, last_break_date, pct_off_high, adr_pct,
+                             last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
