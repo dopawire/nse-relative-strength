@@ -366,29 +366,36 @@ def fetch_bhavcopy(day):
             rows = csv.DictReader(
                 io.StringIO(z.read(name).decode("utf-8-sig", "ignore")))
 
-            def fnum(row, k1, k2):
-                v = row.get(k1) or row.get(k2) or ""
-                try:
-                    return float(str(v).replace(",", ""))
-                except ValueError:
-                    return None
+            def fnum(row, *keys):
+                for k in keys:
+                    v = row.get(k)
+                    if v not in (None, ""):
+                        try:
+                            return float(str(v).replace(",", ""))
+                        except ValueError:
+                            continue
+                return None
 
             out = {}
             for row in rows:
-                sym = (row.get("SYMBOL") or "").strip()
+                sym = (row.get("SYMBOL") or row.get("TckrSymb") or "").strip()
                 if not sym:
                     continue
-                series = (row.get("SERIES") or "").strip()
+                # modern schema tags instruments; legacy uses the SERIES column
+                instr = (row.get("FinInstrmTp") or "").strip()
+                if instr and instr != "STK":
+                    continue                   # skip ETFs, bonds, options, ...
+                series = (row.get("SERIES") or row.get("SctySrs") or "").strip()
                 if series and series not in ("EQ", "BE", "BZ", "SM", "ST"):
                     continue                   # skip debt/ETF/other segments
-                c = fnum(row, "CLOSE_PRICE", "CLOSE")
+                c = fnum(row, "CLOSE_PRICE", "CLOSE", "ClsPric")
                 if c is None or c <= 0:
                     continue
                 if sym in out and series != "EQ":
                     continue                   # prefer the EQ row on duplicates
                 out[sym] = {"close": c,
-                            "high": fnum(row, "HIGH_PRICE", "HIGH") or c,
-                            "low": fnum(row, "LOW_PRICE", "LOW") or c}
+                            "high": fnum(row, "HIGH_PRICE", "HIGH", "HghPric") or c,
+                            "low": fnum(row, "LOW_PRICE", "LOW", "LwPric") or c}
             return out if out else None
         except Exception:
             continue
@@ -416,6 +423,44 @@ def fetch_bhav_indices(day):
         return out if out else None
     except Exception:
         return None
+
+
+def purge_flat_carries(cache, highs, lows, have):
+    """Yahoo re-serves stale flat carries on some outage days (e.g. 2025-03-18:
+    thousands of bars equal to the previous close while the index moved
+    +1.8% — a data-pipeline failure day).  For any date where >90% of the
+    bars are flat duplicates, drop the flat bars so they can't distort
+    EMA/ADR metrics; genuine movers on the day are kept.  Returns purged dates."""
+    cov = {}
+    for s in have:
+        for d in cache.get(s, {}):
+            cov[d] = cov.get(d, 0) + 1
+    n = len(have) or 1
+    purged = []
+    for day in sorted(cov):
+        if not (0.5 * n < cov[day] < 0.98 * n):
+            continue
+        if not is_fake_flat_day(cache, have, day):
+            continue
+        removed = 0
+        for s in have:
+            ser = cache.get(s, {})
+            if day not in ser:
+                continue
+            prevs = [d for d in ser if d < day]
+            if prevs and ser[day] == ser[prevs[-1]]:
+                del ser[day]
+                highs.get(s, {}).pop(day, None)
+                lows.get(s, {}).pop(day, None)
+                removed += 1
+        if removed:
+            purged.append(day)
+    if purged:
+        write_json_atomic(PRICE_CACHE, cache)
+        write_json_atomic(HIGH_CACHE, highs)
+        write_json_atomic(LOW_CACHE, lows)
+        print(f"Purged flat Yahoo carry-bars on {len(purged)} day(s): {purged}")
+    return purged
 
 
 def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None):
@@ -845,9 +890,8 @@ def compute_breadth(universe, cache, covered_dates):
                 adv += 1
             elif b < a:
                 dec += 1
-        if adv + dec == 0:
-            continue
-        rana.append((adv - dec) / (adv + dec) * 1000.0)
+        # neutral 0.0 keeps the series 1:1 with covered_dates (no skips)
+        rana.append((adv - dec) / (adv + dec) * 1000.0 if adv + dec else 0.0)
         rdates.append(cur)
     if len(rana) < 2:
         return [], [], len(series)
@@ -902,9 +946,8 @@ def compute_macro_breadth(universe, cache, covered_dates):
                     adv += 1
                 elif b < a:
                     dec += 1
-            if adv + dec == 0:
-                continue
-            rana.append((adv - dec) / (adv + dec) * 1000.0)
+            # neutral 0.0 keeps the series 1:1 with covered_dates (no skips)
+            rana.append((adv - dec) / (adv + dec) * 1000.0 if adv + dec else 0.0)
             rdates.append(cur)
         if len(rana) < 2:
             continue
@@ -1720,6 +1763,7 @@ def main():
         _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
         if _rep:
             write_json_atomic(PROVENANCE, prov)
+        purge_flat_carries(cache, highs, lows, have)
 
     # Reference window = last WINDOW benchmark dates that ALSO have broad stock
     # coverage, so a benchmark day that leads the stock cache can't null out RS.

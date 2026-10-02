@@ -58,6 +58,8 @@ with:
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000`. |
+| `cron_daily.sh` | Cron entry point: daily build + audit (+ optional Telegram failure alerts). |
+| `install_cron.sh` | Installs the cron entries (18:30 build, 19:30 stale-retry, weekdays). |
 
 ## Daily use
 
@@ -69,6 +71,19 @@ bash run_server.sh    # 2. start the website
 
 Or, with the server running, click **"Update Prices"** / **"Refresh Stocks"**
 in the website header.
+
+### Automation (optional)
+
+`bash install_cron.sh` installs two weekday cron entries (system timezone):
+
+- **18:30** — `cron_daily.sh`: daily build + data audit
+- **19:30** — `cron_daily.sh --if-stale`: retries once if Yahoo published late
+  and the 18:30 run missed the session
+
+Optional free Telegram failure alerts: create a bot via @BotFather, then put
+`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `~/.config/nse-rs/notify.env`
+(set `TELEGRAM_NOTIFY_OK=1` for success pings too).  CI runs the test suite on
+every push via GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Build options
 
@@ -84,7 +99,7 @@ python3 refresh_classification.py --headful  # show the browser window
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/ -q          # all (56)
+.venv/bin/python -m pytest tests/ -q          # all (61)
 .venv/bin/python -m pytest tests/ -q -m smoke # frontend smoke only
 NO_BROWSER=1 .venv/bin/python -m pytest tests/ -q   # skip browser tests
 .venv/bin/python audit_data.py                # daily data health check

@@ -126,8 +126,38 @@ def check_reconciliation(rs_data):
     return issues
 
 
+def check_data_covers_latest_session():
+    """'Stale' = a trading session has ended but the price cache has no bar for
+    it (Yahoo published late).  Returns issues; empty means data is current."""
+    try:
+        with open(rs.PRICE_CACHE) as fh:
+            bench = json.load(fh).get("__BENCH__", {})
+    except Exception:
+        return ["price cache unreadable"]
+    if not bench:
+        return ["price cache empty"]
+    today = dt.datetime.now(rs.IST).date()
+    now = dt.datetime.now(rs.IST)
+    expected = today
+    while expected.weekday() >= 5 or rs.is_holiday(expected.isoformat()):
+        expected -= dt.timedelta(days=1)
+    # today's own session only counts once it has ended (data settles by ~16:00)
+    if expected == today and now.hour < 16:
+        return []
+    if max(bench) < expected.isoformat():
+        return [f"stale: data ends {max(bench)} but the latest session is "
+                f"{expected.isoformat()} (Yahoo published late?)"]
+    return []
+
+
 def main():
     as_json = "--json" in sys.argv
+    if "--stale-only" in sys.argv:
+        issues = check_data_covers_latest_session()
+        if not as_json:
+            print("current — data covers the latest session" if not issues
+                  else issues[0])
+        sys.exit(1 if issues else 0)
     report = {}
     report["caches"] = check_caches()
 
@@ -146,6 +176,7 @@ def main():
         report["flat_days"] = ["price cache unreadable"]
 
     report["freshness"] = check_freshness()
+    report["latest_session"] = check_data_covers_latest_session()
 
     try:
         with open(rs.RS_DATA_JSON) as fh:
