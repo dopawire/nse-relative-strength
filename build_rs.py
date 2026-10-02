@@ -50,7 +50,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               APPEND_RANGE, MIN_BARS, EMA_PERIODS, BENCHMARK_NAME, BENCH_YSYM,
                               YH_WORKERS, IST, is_holiday)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
-                             last_break_date, pct_off_high, adr_pct,
+                             rs_line, last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -925,7 +925,8 @@ def main():
                     stock["d"] = (round((stock["pct"] - q) * 100, 1)
                                   if q is not None else None)
 
-    ipo = build_ipo_watch(universe, cache, set(excluded))
+    ipo = build_ipo_watch(universe, cache, set(excluded),
+                          cache.get("__BENCH__", {}))
     rotation = compute_rotation(universe, cache, cache.get("__BENCH__", {}),
                                 breadth_dates) if breadth_dates else \
         {"dates": [], "groups": []}

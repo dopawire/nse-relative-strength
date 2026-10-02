@@ -48,9 +48,12 @@ def append_snapshot(levels, window_end):
     return line
 
 
-def build_ipo_watch(universe, cache, excluded):
+def build_ipo_watch(universe, cache, excluded, bench=None):
     """New listings not yet rankable (< WINDOW days of data): symbol, name,
-    first trading day, days of history, LTP, days until first ranking."""
+    first trading day, days of history, LTP, days until first ranking — plus
+    the stock's RS line + EMA21 (`bench` given) so the UI can chart them even
+    where the /api/stock endpoint isn't available (static site)."""
+    from rs_engine.maths import rs_line
     out = []
     for u in universe:
         sym = u["sym"]
@@ -60,9 +63,17 @@ def build_ipo_watch(universe, cache, excluded):
         if not ser or len(ser) >= WINDOW:
             continue
         first = min(ser)
-        out.append({"s": sym, "n": u["name"], "first": first,
-                    "days": len(ser), "ltp": round(ser[max(ser)], 2),
-                    "eta": WINDOW - len(ser)})
+        entry = {"s": sym, "n": u["name"], "first": first,
+                 "days": len(ser), "ltp": round(ser[max(ser)], 2),
+                 "eta": WINDOW - len(ser)}
+        if bench:
+            line = rs_line(ser, bench)
+            if line:
+                days, rs, ema = line
+                entry["dates"] = days
+                entry["rs"] = [round(x, 5) for x in rs]
+                entry["ema21"] = [round(x, 5) for x in ema]
+        out.append(entry)
     out.sort(key=lambda x: x["first"], reverse=True)
     return out
 

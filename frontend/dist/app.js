@@ -1006,14 +1006,23 @@
         <div class="mtip sm-tip" id="sm-tip"></div>`;
       bindLineChart('sm-chart', d.dates, d.rs, d.ema21, document.getElementById('sm-tip'));
     }).catch(() => {
-      if (m && m.r) {
+      // no /api/stock (static site / old server) — use embedded data instead
+      const ipo = ((state.meta && state.meta.ipo) || []).find(x => x.s === sym);
+      if (ipo && ipo.rs && ipo.rs.length > 1) {
+        const above = ipo.rs[ipo.rs.length - 1] >= ipo.ema21[ipo.ema21.length - 1];
+        plot.innerHTML = `<div class="sm-legend"><span class="lg-rs">RS line (stock ÷ NIFTY 500)</span><span class="lg-ema">EMA21</span><span class="sm-ltp">LTP ${utils.fmtPrice(ipo.ltp)} · ${above ? 'above' : 'below'} EMA21</span></div>
+          ${lineChartSVG(ipo.rs, ipo.ema21, 'sm-chart', 700, 260)}
+          <div class="mtip sm-tip" id="sm-tip"></div>`;
+        bindLineChart('sm-chart', ipo.dates, ipo.rs, ipo.ema21,
+          document.getElementById('sm-tip'));
+      } else if (m && m.r) {
         plot.innerHTML = `<div class="sm-legend"><span class="lg-rs">26-day RS window</span><span class="sm-ltp">full chart needs the local server</span></div>
           ${lineChartSVG(m.r, null, 'sm-chart', 700, 220)}
           <div class="mtip sm-tip" id="sm-tip"></div>`;
         bindLineChart('sm-chart', (state.meta.window_dates || m.r.map((_, i) => 'd' + i)), m.r, null,
           document.getElementById('sm-tip'));
       } else {
-        plot.innerHTML = '<div class="brd-empty">Chart unavailable</div>';
+        plot.innerHTML = '<div class="brd-empty">Chart unavailable — restart the local server (bash run_server.sh) to enable full charts.</div>';
       }
     });
   }

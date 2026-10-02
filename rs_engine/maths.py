@@ -64,6 +64,20 @@ def rs_ema_flag(ser, bench_series, period=21):
     return 1 if ratios[-1] >= e else 0
 
 
+def rs_line(ser, bench_series, lookback=125):
+    """TradingView-style RS line (stock/benchmark) + its 21-day EMA over the
+    last `lookback` common dates.  Returns (dates, rs, ema21) or None."""
+    days = [d for d in sorted(ser) if d in bench_series][-lookback:]
+    if not days:
+        return None
+    rs = [ser[d] / bench_series[d] for d in days]
+    k = 2.0 / 22
+    ema = [rs[0]]
+    for v in rs[1:]:
+        ema.append(v * k + ema[-1] * (1 - k))
+    return days, rs, ema
+
+
 def last_break_date(closes_by_date, lookback):
     """Date of the most recent corporate-action-style discontinuity within the last
     `lookback` sessions, or None. Prices before that date describe a different

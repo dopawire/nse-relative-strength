@@ -82,6 +82,22 @@ def test_ipo_watch_lists_only_unrankable_excluded():
     assert ipo[0]["days"] == 3
     assert ipo[0]["eta"] == build_rs.WINDOW - 3
     assert ipo[0]["ltp"] == 102.0
+    assert "rs" not in ipo[0]                       # no bench given → no chart data
+
+
+def test_ipo_watch_embeds_rs_line_when_bench_given():
+    """New-listing charts must work even without the /api/stock endpoint
+    (static site) — the RS line + EMA21 are embedded in the meta.ipo data."""
+    cache = {
+        "NEW1": {"2026-09-20": 100.0, "2026-09-21": 101.0, "2026-09-22": 102.0},
+    }
+    bench = {"2026-09-20": 500.0, "2026-09-21": 501.0, "2026-09-22": 502.0}
+    universe = [{"sym": "NEW1", "name": "New One"}]
+    ipo = build_ipo_watch(universe, cache, excluded={"NEW1"}, bench=bench)
+    e = ipo[0]
+    assert e["dates"] == ["2026-09-20", "2026-09-21", "2026-09-22"]
+    assert e["rs"] == [0.2, 0.2016, 0.20319]
+    assert e["ema21"] == [0.2, 0.20015, 0.20042]
 
 
 def test_snapshot_roundtrip_and_idempotency(tmp_path, monkeypatch):

@@ -182,19 +182,16 @@ def get_stock(sym: str):
     """Per-stock RS line (stock / NIFTY 500) + its 21-day EMA — the
     TradingView-style chart — computed on demand from the price cache."""
     _check_ready()
+    from rs_engine.maths import rs_line
     cache = _prices()
     ser = cache.get(sym)
     bench = cache.get("__BENCH__", {})
     if not ser or not bench:
         raise HTTPException(404, f"unknown symbol: {sym}")
-    days = [d for d in sorted(ser) if d in bench][-125:]
-    if not days:
+    line = rs_line(ser, bench)
+    if not line:
         raise HTTPException(404, f"no benchmark overlap for: {sym}")
-    rs = [ser[d] / bench[d] for d in days]
-    k = 2.0 / 22
-    ema = [rs[0]]
-    for v in rs[1:]:
-        ema.append(v * k + ema[-1] * (1 - k))
+    days, rs, ema = line
     name = ""
     for lv in _data.get("levels", []):
         for g in lv.get("groups", []):
