@@ -588,8 +588,14 @@ def rs_data():
 
 
 def _require_synced(price_cache, rs_data):
-    """Skip when the price cache moved on since the build — background updates
-    make artifact-vs-cache recomputation racy."""
+    """Skip when the price cache or universe master moved on since the build —
+    background updates make artifact-vs-cache recomputation racy."""
+    import hashlib
+    master_sha = rs_data["meta"].get("master_sha")
+    if master_sha:
+        cur = hashlib.sha256((ROOT / 'nse_stock_master.csv').read_bytes()).hexdigest()
+        if cur != master_sha:
+            pytest.skip("nse_stock_master.csv changed since the build — run build_rs.py to resync")
     ref = (rs_data["meta"].get("window_dates")
            or rs_data["breadth"]["dates"][-WINDOW:])
     if ref and max(price_cache["__BENCH__"]) != ref[-1]:

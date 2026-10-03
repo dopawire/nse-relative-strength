@@ -216,9 +216,10 @@
   function activateTab(tab) {
     state.activeTab = tab;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-    // Show/hide toolbars: filters apply to level tables only
+    // Toolbars: level tables get search + filters; New Listings gets search only
     const isLevel = !['breadth', 'rotation', 'ipo'].includes(tab);
-    $.toolbarSection.style.display = isLevel ? '' : 'none';
+    $.toolbarSection.style.display = (tab === 'breadth' || tab === 'rotation') ? 'none' : '';
+    $.toolbarSection.classList.toggle('search-only', tab === 'ipo');
     $.note.style.display = isLevel ? '' : 'none';
     renderTab(tab);
   }
@@ -275,6 +276,8 @@
   function refreshCurrentView() {
     if (state.activeTab === 'breadth') {
       renderBreadth(true);   // use cached data — avoid re-fetching
+    } else if (state.activeTab === 'ipo') {
+      renderIpo();
     } else if (state.levelData[state.activeTab]) {
       renderLevelTable(state.activeTab, state.levelData[state.activeTab]);
     }
@@ -352,6 +355,7 @@
 
     // Update search info
     $.searchInfo.textContent = filtering ? `${shownGroups} group(s), ${shownStocks} stock(s)` : '';
+    updateIpoHint();
 
     // Bind events
     bindTableEvents();
@@ -853,14 +857,46 @@
     });
   }
 
+  // Multi-word search: every token must appear in name or symbol
+  function ipoMatches(ipo, q) {
+    const toks = (q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (!toks.length) return ipo;
+    return ipo.filter(i => toks.every(t => (i.n + ' ' + i.s).toLowerCase().includes(t)));
+  }
+
+  // When a ranking-table search also matches a new listing, surface a clickable
+  // hint so stocks like Jindal Supreme (JSIPL) are discoverable from any tab.
+  function updateIpoHint() {
+    const q = ($.searchInput.value || '').trim().toLowerCase();
+    if (!q || state.activeTab !== 'macro' && state.activeTab !== 'sector'
+        && state.activeTab !== 'industry' && state.activeTab !== 'basic') return;
+    const hits = ipoMatches((state.meta && state.meta.ipo) || [], q);
+    if (!hits.length) return;
+    const b = document.createElement('button');
+    b.className = 'ipo-hint';
+    b.type = 'button';
+    b.textContent = hits.length === 1
+      ? `${hits[0].s} in New Listings →`
+      : `${hits.length} in New Listings →`;
+    b.addEventListener('click', () => setHashTab('ipo'));
+    $.searchInfo.append(' ', b);
+  }
+
   function renderIpo() {
     const ipo = (state.meta && state.meta.ipo) || [];
     const win = ((state.meta && state.meta.window_dates) || []).length || 26;
+    const q = ($.searchInput.value || '').trim().toLowerCase();
+    const shown = ipoMatches(ipo, q);
+    $.searchInfo.textContent = q ? `${shown.length} of ${ipo.length} new listing(s)` : '';
     if (!ipo.length) {
       $.content.innerHTML = '<div class="brd-empty">No new listings awaiting ranking right now.</div>';
       return;
     }
-    const rows = ipo.map(i => `<tr class="ipo-row" data-sym="${utils.esc(i.s)}">
+    if (!shown.length) {
+      $.content.innerHTML = `<div class="brd-empty">No new listings match <code>${utils.esc(q)}</code>.</div>`;
+      return;
+    }
+    const rows = shown.map(i => `<tr class="ipo-row" data-sym="${utils.esc(i.s)}">
         <td class="mnm">${utils.esc(i.n)}<span class="msym">${utils.esc(i.s)}</span></td>
         <td class="tnum">${i.first}</td>
         <td class="tnum">${i.days}</td>

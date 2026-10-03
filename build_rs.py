@@ -36,6 +36,7 @@ import json
 import time
 import shutil
 import random
+import hashlib
 import zipfile
 import argparse
 import datetime as dt
@@ -938,6 +939,7 @@ def main():
         "drange": f"{ref_dates[0]} → {ref_dates[-1]}" if ref_dates else "n/a",
         "window_dates": ref_dates,
         "gen": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "master_sha": hashlib.sha256(open(MASTER_CSV, "rb").read()).hexdigest(),
         "n_stocks": n_stocks,
         "n_window": n_window,
         "excluded": excluded,

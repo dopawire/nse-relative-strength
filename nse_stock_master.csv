@@ -2610,11 +2610,13 @@ MANIKA,Manika Plastech Limited,BE,INE0KWF01020,Industrials,Capital Goods,Industr
 PARIN,Parin Enterprises Limited,EQ,INE00U801010,Consumer Discretionary,Consumer Durables,Consumer Durables,Furniture Home Furnishing
 SONA,Sonaselection India Limited,BE,INE0LLZ01011,Consumer Discretionary,Textiles,Textiles & Apparels,Other Textile Products
 SSRETAIL,SS Retail Limited,EQ,INE1EQW01028,Consumer Discretionary,Consumer Services,Retailing,Speciality Retail
-ADROITIND,Adroit Industries (India) Limited,BE,INE505M01015,,,,
+ADROITIND,Adroit Industries (India) Limited,BE,INE505M01015,Consumer Discretionary,Automobile and Auto Components,Auto Components,Auto Components & Equipments
 AGASTYAEN,Agastya Energy and Infrastructure Limited,BE,INE753W01010,Commodities,Chemicals,Chemicals & Petrochemicals,Specialty Chemicals
-ARMEE,ArMee Infotech Limited,EQ,INE0TWE01016,,,,
-ELEVATE,Elevate Campuses Limited,EQ,INE147X01013,,,,
-GSPLTRANS,GSPL Transmission Limited,BE,INE1TUG01013,,,,
+ARMEE,ArMee Infotech Limited,EQ,INE0TWE01016,Information Technology,Information Technology,IT - Services,IT Enabled Services
+ELEVATE,Elevate Campuses Limited,EQ,INE147X01013,Services,Services,Commercial Services & Supplies,Diversified Commercial Services
+GSPLTRANS,GSPL Transmission Limited,BE,INE1TUG01013,Energy,Oil Gas & Consumable Fuels,Gas,Gas Transmission/Marketing
 QUINTEGRA,Quintegra Solutions Limited,EQ,INE033B01011,Information Technology,Information Technology,IT - Software,Computers - Software & Consulting
-SWASTIKAIN,Swastika Infra Limited,BE,INE1QJA01015,,,,
+SWASTIKAIN,Swastika Infra Limited,BE,INE1QJA01015,Industrials,Construction,Construction,Civil Construction
 VARMORA,Varmora Granito Limited,EQ,INE0M5301040,Consumer Discretionary,Consumer Durables,Consumer Durables,Ceramics
+AONESTEELS,A-One Steels India Limited,EQ,INE0OTC01025,Industrials,Capital Goods,Industrial Products,Iron & Steel Products
+MONEYVIEW,Moneyview Limited,EQ,INE0PTN01011,Financial Services,Financial Services,Financial Technology (Fintech),Financial Technology (Fintech)

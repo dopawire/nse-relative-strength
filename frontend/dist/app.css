@@ -151,6 +151,9 @@ button{cursor:pointer}
 .search-input::placeholder{color:var(--text-muted)}
 .search-input:focus{outline:none}
 .search-info{font-size:11px;color:var(--text-muted);white-space:nowrap;min-width:fit-content}
+.search-only .filter-row{display:none}
+.ipo-hint{font:inherit;font-size:11px;background:var(--bg-inset);color:var(--accent,#4a9eff);border:1px solid var(--border,#333);border-radius:4px;padding:1px 8px;cursor:pointer}
+.ipo-hint:hover{filter:brightness(1.15)}
 
 /* Filters */
 .filter-row{display:flex;align-items:center;gap:8px;padding:0 16px 12px;flex-wrap:wrap}
