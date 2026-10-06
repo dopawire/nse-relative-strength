@@ -1,0 +1,77 @@
+name: Daily data refresh
+
+# Cloud fallback for the local cron: the site must update daily even when the
+# home machine is off at 18:30.  Builds from Yahoo (public data, no keys),
+# commits only when the numbers actually changed, and deploys Pages itself
+# (pushes made with GITHUB_TOKEN don't retrigger the push-based deploy).
+
+on:
+  schedule:
+    - cron: "30 13 * * 1-5"   # 19:00 IST — market closed, Yahoo settled
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Build rankings
+        run: |
+          cp rs_data.json /tmp/rs_before.json
+          python build_rs.py
+
+      - name: Audit
+        run: python audit_data.py
+
+      - name: Detect real change
+        id: diff
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          def strip(p):
+              d = json.load(open(p))
+              d.get("meta", {}).pop("gen", None)
+              return d
+          print("changed=true" if strip("/tmp/rs_before.json") != strip("rs_data.json") else "changed=false")
+          PY
+
+      - name: Commit data snapshot
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "dopawire"
+          git config user.email "110220100+dopawire@users.noreply.github.com"
+          gen=$(python -c "import json; print(json.load(open('rs_data.json'))['meta']['gen'])")
+          git add rs_data.json
+          git commit -q -m "data snapshot $gen"
+          git push
+
+      - name: Export static site
+        if: steps.diff.outputs.changed == 'true'
+        run: python export_static.py
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.diff.outputs.changed == 'true'
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        if: steps.diff.outputs.changed == 'true'
+        uses: actions/deploy-pages@v4
