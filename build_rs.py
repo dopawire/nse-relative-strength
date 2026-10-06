@@ -632,13 +632,11 @@ def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
     all_dates = set()
     for s in have:
         all_dates.update(cache[s].keys())
-    # Only fill RECENT gaps: the index-gap incidents (Jul 28, Aug 28) are
-    # last-day events.  Old dates missing from the benchmark are mostly NSE
-    # holidays that Yahoo wrongly gave bars to for many stocks — filling those
-    # would inject fake trading days into the benchmark/breadth history.
-    cutoff = dt.date.fromisoformat(max(bench_dates)) - dt.timedelta(days=45)
+    # Historical gaps are legitimate too (e.g. 2025-01-01 / 2026-01-01: NSE
+    # traded but Yahoo's index bar is simply absent).  Fake holiday-bar days
+    # are already excluded via is_holiday / is_fake_flat_day below, so no
+    # date-window cutoff is needed.
     missing = sorted(d for d in all_dates if d not in bench_dates
-                     if d >= cutoff.isoformat()
                      if sum(1 for s in have if d in cache[s]) >= thresh
                      if not is_holiday(d)
                      if not is_fake_flat_day(cache, have, d))
@@ -785,9 +783,10 @@ def main():
     prov = load_json_cache(PROVENANCE)
     if not args.html_only:
         _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
-        if _rep:
-            write_json_atomic(PROVENANCE, prov)
         purge_flat_carries(cache, highs, lows, have)
+    # Always persist the sidecar (empty = every bar came from Yahoo) so audit
+    # checks and fresh runners see the file.
+    write_json_atomic(PROVENANCE, prov)
 
     # Reference window = last WINDOW benchmark dates that ALSO have broad stock
     # coverage, so a benchmark day that leads the stock cache can't null out RS.
