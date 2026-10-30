@@ -633,6 +633,14 @@ def test_cache_benchmark_recent_values_match_investing(price_cache):
     assert not mismatches, f"benchmark cache disagrees with Investing.com: {mismatches}"
 
 
+def test_group_index_uses_only_listed_members(rs_data):
+    """A group's constituent count must equal its listed stocks — a stock left
+    out of the table (gaps in the window) must not move the group index."""
+    for lv in rs_data["levels"]:
+        for g in lv["groups"]:
+            assert g["n"] == len(g["members"]), (lv["key"], g["name"])
+
+
 def test_rs_data_structure(rs_data):
     assert set(rs_data) == {"meta", "breadth", "rotation", "levels"}
     assert rs_data["meta"]["n_stocks"] > 2000

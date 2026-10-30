@@ -47,3 +47,24 @@ def test_stale_check_before_close_requires_previous_session(tmp_path, monkeypatc
     assert issues and "2026-10-29" in issues[0]
     p.write_text(json.dumps({"__BENCH__": {"2026-10-29": 1.0}}))
     assert audit_data.check_data_covers_latest_session() == []
+
+
+def test_latest_session_skips_weekend_and_waits_for_close():
+    from rs_engine.config import latest_session, IST
+    assert latest_session(dt.datetime(2026, 10, 30, 17, 0, tzinfo=IST)) == "2026-10-30"
+    assert latest_session(dt.datetime(2026, 10, 30, 9, 0, tzinfo=IST)) == "2026-10-29"
+    assert latest_session(dt.datetime(2026, 11, 1, 12, 0, tzinfo=IST)) == "2026-10-30"  # Sun
+
+
+def test_holiday_calendar_flags_missing_next_year(monkeypatch):
+    monkeypatch.setattr(audit_data, "load_holidays", lambda: {"2026-12-25"})
+    assert audit_data.check_holiday_calendar(dt.date(2026, 11, 30)) == []
+    assert "2027" in audit_data.check_holiday_calendar(dt.date(2026, 12, 1))[0]
+    monkeypatch.setattr(audit_data, "load_holidays", lambda: {"2027-01-26"})
+    assert audit_data.check_holiday_calendar(dt.date(2026, 12, 1)) == []
+
+
+def test_coverage_ignores_symbols_outside_universe():
+    cache = {"__BENCH__": {}, "LIVE": {"d": 1.0}, "DELISTED": {"d": 1.0}}
+    assert audit_data._have(cache) == ["LIVE", "DELISTED"]
+    assert audit_data._have(cache, ["LIVE", "NOPRICES"]) == ["LIVE"]

@@ -152,7 +152,9 @@ def stitch_renamed(stores, changes):
     """Prepend a renamed stock's pre-rename history (old symbol) to its new
     symbol in each {sym: {date: value}} store — Yahoo often starts the new
     ticker on the rename day, which would otherwise make an old company look
-    like a fresh listing.  Only dates before the new series begins are added."""
+    like a fresh listing.  Only dates before the new series begins are added.
+    Returns the number of bars added."""
+    added = 0
     for old, new in changes:
         for store in stores:
             src, dst = store.get(old), store.get(new)
@@ -162,6 +164,8 @@ def stitch_renamed(stores, changes):
             for d, v in src.items():
                 if d < first:
                     dst[d] = v
+                    added += 1
+    return added
 
 
 # --------------------------------------------------------------------------- #
@@ -842,7 +846,10 @@ def main():
         if miss[:10]:
             print("  sample failures:", miss[:10])
 
-    stitch_renamed((cache, highs, lows), changes)
+    if stitch_renamed((cache, highs, lows), changes):
+        # persist, so the backend's per-stock charts see the full history too
+        for path, obj in ((PRICE_CACHE, cache), (HIGH_CACHE, highs), (LOW_CACHE, lows)):
+            write_json_atomic(path, obj)
 
     bench = cache.get("__BENCH__", {})
     if not bench:
@@ -939,10 +946,14 @@ def main():
                                    len(ref_dates)):
                     skipped_breaks.append(u["sym"])
                     continue
-                series.append(ser)
+                # only stocks with a full window enter the group index — one
+                # with gaps would make the equal-weight average jump as its
+                # missing days change the constituent set
                 st = stock_metrics(u, ser)
-                if st is not None:
-                    stocks.append(st)
+                if st is None:
+                    continue
+                series.append(ser)
+                stocks.append(st)
             if not series:
                 continue
             rs, n = equal_weight_rs(series, bench, ref_dates)

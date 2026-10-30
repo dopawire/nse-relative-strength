@@ -140,3 +140,12 @@ def test_daily_report_written(tmp_path):
     html = out.read_text()
     assert "daily digest" in html and "IT" in html
     assert "-12.0" in html and "Market breadth" in html
+
+
+def test_daily_report_survives_missing_breadth(tmp_path):
+    """A failed / empty breadth calc must not crash the build at the digest."""
+    meta = {"drange": "x", "gen": "x", "n_window": 1, "n_stocks": 1, "src": {}}
+    for breadth in (None, {"osc": []}):
+        out = tmp_path / "report.html"
+        write_daily_report(str(out), meta, breadth, [], [])
+        assert "Latest oscillator: <b>n/a</b>" in out.read_text()

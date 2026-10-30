@@ -14,6 +14,7 @@ import json
 import datetime as dt
 
 import build_rs as rs
+from rs_engine.config import latest_session, load_holidays
 
 ROOT = rs.HERE
 
@@ -38,13 +39,21 @@ def check_caches():
     return issues
 
 
-def check_benchmark_calendar(cache):
+def _have(cache, symbols=None):
+    """Symbols with price data — limited to `symbols` (the current universe)
+    when given, so delisted / pre-rename tickers lingering in the cache don't
+    inflate the coverage thresholds."""
+    pool = symbols if symbols is not None else (s for s in cache if s != "__BENCH__")
+    return [s for s in pool if cache.get(s)]
+
+
+def check_benchmark_calendar(cache, symbols=None):
     """Every weekday between the first and last benchmark date must either be
     a trading day in the benchmark or an official NSE holiday."""
     bench = cache.get("__BENCH__", {})
     if not bench:
         return ["benchmark: empty"]
-    have = [s for s in cache if s != "__BENCH__" and cache[s]]
+    have = _have(cache, symbols)
     thresh = max(1, int(0.5 * len(have)))
     dates = sorted(bench)
     start, end = dt.date.fromisoformat(dates[0]), dt.date.fromisoformat(dates[-1])
@@ -66,10 +75,10 @@ def check_benchmark_calendar(cache):
     return issues
 
 
-def check_flat_days(cache):
+def check_flat_days(cache, symbols=None):
     """Yahoo's fake holiday/outage bars: >90% of stock closes equal to the
     previous close.  Such dates must not sit in the benchmark."""
-    have = [s for s in cache if s != "__BENCH__" and cache[s]]
+    have = _have(cache, symbols)
     bench = cache.get("__BENCH__", {})
     n = len(have)
     cov = {}
@@ -125,6 +134,18 @@ def check_reconciliation(rs_data):
     return issues
 
 
+def check_holiday_calendar(today=None):
+    """From December on, nse_holidays.csv must already hold next year's
+    holidays — otherwise every January holiday reads as a stale build (hourly
+    rebuilds + alerts).  refresh_classification.py syncs them from NSE once
+    published; add them by hand if NSE is late."""
+    today = today or dt.datetime.now(rs.IST).date()
+    nxt = str(today.year + 1)
+    if today.month == 12 and not any(d.startswith(nxt) for d in load_holidays()):
+        return [f"nse_holidays.csv has no {nxt} holidays yet"]
+    return []
+
+
 def check_data_covers_latest_session():
     """'Stale' = a trading session has ended but the price cache has no bar for
     it (Yahoo published late).  Returns issues; empty means data is current."""
@@ -135,16 +156,11 @@ def check_data_covers_latest_session():
         return ["price cache unreadable"]
     if not bench:
         return ["price cache empty"]
-    today = dt.datetime.now(rs.IST).date()
-    now = dt.datetime.now(rs.IST)
-    # today's own session only counts once it has ended (data settles by
-    # ~16:00) — before that the PREVIOUS session must be present
-    expected = today if now.hour >= 16 else today - dt.timedelta(days=1)
-    while expected.weekday() >= 5 or rs.is_holiday(expected.isoformat()):
-        expected -= dt.timedelta(days=1)
-    if max(bench) < expected.isoformat():
+    # before today's close (~16:00) the PREVIOUS session must be present
+    expected = latest_session(dt.datetime.now(rs.IST))
+    if max(bench) < expected:
         return [f"stale: data ends {max(bench)} but the latest session is "
-                f"{expected.isoformat()} (Yahoo published late?)"]
+                f"{expected} (Yahoo published late?)"]
     return []
 
 
@@ -167,13 +183,15 @@ def main():
         cache = {}
 
     if cache:
-        report["benchmark_calendar"] = check_benchmark_calendar(cache)
-        report["flat_days"] = check_flat_days(cache)
+        symbols = [u["sym"] for u in rs.read_universe()]
+        report["benchmark_calendar"] = check_benchmark_calendar(cache, symbols)
+        report["flat_days"] = check_flat_days(cache, symbols)
     else:
         report["benchmark_calendar"] = ["price cache unreadable"]
         report["flat_days"] = ["price cache unreadable"]
 
     report["freshness"] = check_freshness()
+    report["holiday_calendar"] = check_holiday_calendar()
     report["latest_session"] = check_data_covers_latest_session()
 
     try:

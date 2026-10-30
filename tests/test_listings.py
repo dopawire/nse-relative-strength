@@ -87,3 +87,21 @@ def test_fill_stock_gaps_fills_holes_not_suspensions(tmp_path, monkeypatch):
     assert cache["HOLE"]["2026-10-28"] == 5.0 and highs["HOLE"]["2026-10-28"] == 6.0
     assert cache["LATEST"]["2026-10-29"] == 5.0
     assert "2026-10-28" not in cache["SUSP"]          # no later bar → not a hole
+
+
+def test_sync_holidays_adds_weekdays_only(tmp_path, monkeypatch):
+    path = tmp_path / "hol.csv"
+    path.write_text("date,description\n2026-12-25,Christmas\n")
+    monkeypatch.setattr(rc, "HOLIDAYS", str(path))
+
+    class Resp:
+        status_code = 200
+
+        def json(self):
+            return {"CM": [{"tradingDate": "25-Dec-2026", "description": "Christmas"},
+                           {"tradingDate": "26-Jan-2027", "description": "Republic Day"},
+                           {"tradingDate": "07-Nov-2027", "description": "Muhurat (Sun)"}]}
+
+    monkeypatch.setattr(rc.requests, "get", lambda *a, **k: Resp())
+    rc.sync_holidays()
+    assert [r["date"] for r in _read(path)] == ["2026-12-25", "2027-01-26"]

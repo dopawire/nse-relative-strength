@@ -67,7 +67,7 @@ with:
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
-| `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000`. |
+| `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000` (`NSE_RS_HOST=0.0.0.0` to expose it on the LAN). |
 | `cron_daily.sh` | Cron entry point: daily build + audit (+ optional Telegram failure alerts). |
 | `install_cron.sh` | Installs the cron entries (18:30 build, 19:30 stale-retry, weekdays). |
 | `export_static.py` | Build a read-only static site into `site/` (no backend needed). |
@@ -186,6 +186,10 @@ driver) cannot run.  The shell scripts pick the interpreter via
   likewise Indian-IP-only (it is a fallback, not a requirement).
 - **Price caches live in `~/.cache/nse-rs/`** (override with `NSE_RS_CACHE_DIR`)
   — outside the repo, safe from the fuseblk/NTFS quirks that once corrupted a
-  cache. `rs_data.json` and `rs_view.html` are generated and git-ignored.
+  cache. `rs_view.html` / `daily_report.html` are generated and git-ignored;
+  `rs_data.json` is generated too but **committed** — it is the snapshot the
+  public site serves.
 - `nse_holidays.csv` is the official NSE trading-holiday calendar — the build
   and audit use it to skip holidays and to validate the trading calendar.
+  `refresh_classification.py` merges NSE's published list into it daily; the
+  audit fails from December on if next year's holidays are still missing.

@@ -112,3 +112,11 @@ def test_pipeline_status(client):
     assert r.status_code == 200
     d = r.json()
     assert d["running"] in (True, False) and "last_result" in d
+
+
+def test_reload_drops_cached_prices(client):
+    """After a pipeline run the per-stock charts must re-read the price cache."""
+    import backend.main as m
+    m._price_cache = {"STALE": {"2020-01-01": 1.0}}
+    assert client.post("/api/reload").status_code == 200
+    assert m._price_cache is None

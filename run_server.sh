@@ -12,5 +12,8 @@ if [ ! -f "$DATA_FILE" ]; then
     "$PY" build_rs.py --html-only
 fi
 
-echo "Starting NSE RS server on http://localhost:8000"
-exec "$PY" -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# localhost only by default: the Update/Refresh endpoints start long jobs and
+# have no auth.  NSE_RS_HOST=0.0.0.0 bash run_server.sh to serve the LAN.
+HOST="${NSE_RS_HOST:-127.0.0.1}"
+echo "Starting NSE RS server on http://$HOST:8000"
+exec "$PY" -m uvicorn backend.main:app --host "$HOST" --port 8000

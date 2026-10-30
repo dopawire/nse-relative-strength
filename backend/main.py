@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
+from rs_engine.config import WINDOW, BENCHMARK_NAME
 from backend.models import (
     MetaResponse, LevelSummary, LevelResponse,
     GroupOut, BreadthResponse, RotationResponse, StockDetail,
@@ -24,8 +25,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DATA_PATH = os.path.join(ROOT, "rs_data.json")
 STATIC_DIR = os.path.realpath(os.path.join(ROOT, "frontend", "dist"))
-WINDOW = 26
-BENCHMARK_NAME = "NIFTY 500"
 
 # In-memory data — loaded at startup, replaced on /api/reload.
 # None means "not loaded yet" (startup in progress).
@@ -35,7 +34,8 @@ _group_index: dict[int, dict] = {}   # gid -> group dict for O(1) lookup
 
 def _load_data_from_disk():
     """Load rs_data.json into memory.  Called at startup and on /api/reload."""
-    global _data, _group_index
+    global _data, _group_index, _price_cache
+    _price_cache = None          # per-stock charts re-read the fresh price cache
     if not os.path.exists(DATA_PATH):
         print(f"WARNING: {DATA_PATH} not found. Run build_rs.py first.")
         _data = {"meta": {}, "levels": [], "breadth": None}
@@ -192,12 +192,11 @@ def get_stock(sym: str):
     if not line:
         raise HTTPException(404, f"no benchmark overlap for: {sym}")
     days, rs, ema = line
-    name = ""
-    for lv in _data.get("levels", []):
-        for g in lv.get("groups", []):
-            for m in g.get("members", []):
-                if m["s"] == sym:
-                    name = m["n"]
+    name = next((m["n"] for lv in _data.get("levels", [])
+                 for g in lv.get("groups", []) for m in g.get("members", [])
+                 if m["s"] == sym),
+                next((i["n"] for i in _data.get("meta", {}).get("ipo", [])
+                      if i["s"] == sym), ""))     # new listings aren't in a level
     return {"sym": sym, "name": name, "dates": days, "rs": rs,
             "ema21": ema, "ltp": ser[days[-1]],
             "rse": 1 if rs[-1] >= ema[-1] else 0}
@@ -337,4 +336,4 @@ if os.path.isdir(STATIC_DIR):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)

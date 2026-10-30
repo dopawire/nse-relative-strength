@@ -11,6 +11,7 @@ What it does:
      each new symbol and reads secInfo -> macro / sector / industry / basic.
      (Plain requests/curl_cffi get 403 here; only a real browser session works.)
   4. Appends the new rows to nse_stock_master.csv.
+  5. Merges NSE's published trading holidays into nse_holidays.csv.
 
 Why a browser: NSE's GetQuoteApi sits behind Akamai Bot Manager, which needs a
 JS-validated _abck cookie. Playwright runs that JS, so the fetch succeeds just
@@ -32,6 +33,7 @@ import io
 import sys
 import time
 import argparse
+import datetime as dt
 
 import requests
 
@@ -39,6 +41,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER = os.path.join(HERE, "nse_stock_master.csv")
 CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")   # old,new,isin,date
 DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
+HOLIDAYS = os.path.join(HERE, "nse_holidays.csv")
+HOLIDAY_API = "https://www.nseindia.com/api/holiday-master?type=trading"
 EQUITY_L = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 FIELDS = ["symbol", "company", "series", "isin",
           "macro", "sector", "industry", "basicIndustry"]
@@ -114,6 +118,42 @@ def parse_equity_text(text):
             rows[sym] = {"symbol": sym, "company": g("NAME OF COMPANY"),
                          "series": g("SERIES") or "EQ", "isin": g("ISIN NUMBER")}
     return rows
+
+
+def sync_holidays():
+    """Merge NSE's published cash-market trading holidays into
+    nse_holidays.csv — adds, never removes.  Weekdays only: weekend entries
+    (and Sunday Muhurat sessions) never affect a trading calendar.  NSE posts
+    next year's list around December."""
+    try:
+        r = requests.get(HOLIDAY_API, timeout=20,
+                         headers={"User-Agent": NSE_UA, "Accept": "application/json"})
+        rows = r.json().get("CM") if r.status_code == 200 else None
+    except (requests.RequestException, ValueError):
+        rows = None
+    if not rows:
+        print("NSE holiday list: unavailable — calendar unchanged.")
+        return
+    with open(HOLIDAYS, newline="", encoding="utf-8") as f:
+        cal = {row["date"]: row["description"] for row in csv.DictReader(f)}
+    added = []
+    for x in rows:
+        try:
+            d = dt.datetime.strptime(x["tradingDate"], "%d-%b-%Y").date()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if d.weekday() < 5 and d.isoformat() not in cal:
+            cal[d.isoformat()] = (x.get("description") or "").strip()
+            added.append(d.isoformat())
+    if not added:
+        return
+    tmp = HOLIDAYS + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["date", "description"])
+        w.writerows(sorted(cal.items()))
+    os.replace(tmp, HOLIDAYS)
+    print(f"Holiday calendar: added {added}")
 
 
 def reconcile(master, live, dry_run=False):
@@ -238,6 +278,8 @@ def main():
             print("  new symbols:", new_syms[:40], "..." if len(new_syms) > 40 else "")
         print("(dry run — no browser, nothing changed)")
         return
+
+    sync_holidays()
 
     new_from_http = [s for s in live if s not in have] if live else []
     if args.stubs_only:

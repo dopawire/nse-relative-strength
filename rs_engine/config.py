@@ -72,3 +72,13 @@ def load_holidays():
 def is_holiday(iso_date):
     """True when the NSE was closed on this date (official holiday calendar)."""
     return iso_date in load_holidays()
+
+
+def latest_session(now=None):
+    """ISO date of the most recent COMPLETED NSE session: today once the data
+    has settled (~16:00 IST), otherwise the previous trading day."""
+    now = now or dt.datetime.now(IST)
+    d = now.date() if now.hour >= 16 else now.date() - dt.timedelta(days=1)
+    while d.weekday() >= 5 or is_holiday(d.isoformat()):
+        d -= dt.timedelta(days=1)
+    return d.isoformat()

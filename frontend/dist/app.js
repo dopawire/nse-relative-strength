@@ -1476,7 +1476,7 @@
                   });
                 }, 500);
               } else {
-                const why = (status.last_output || '').split('\n').filter(Boolean).slice(0, 3).join(' · ');
+                const why = (status.last_output || '').split('\n').filter(Boolean).slice(-3).join(' · ');   // error is at the end
                 flashMsg(`Failed: ${why ? why.slice(0, 150) : status.last_result}`);
               }
             } else if (attempts > maxAttempts) {

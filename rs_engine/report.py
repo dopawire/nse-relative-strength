@@ -15,6 +15,9 @@ def write_daily_report(path, meta, breadth, levels, ipo):
         f"<tr><td>{g['name']}</td><td>{pct(g['pct'])}</td>"
         f"<td>{g['n']}</td></tr>"
         for g in sorted(sector, key=lambda x: x["pct"])[:5])
+    breadth = breadth or {}              # breadth calc can fail / lack history
+    osc = breadth.get("osc") or []
+    latest = f"{osc[-1]:+.1f}" if osc else "n/a"
     div = breadth.get("divergence") or {"state": "none"}
     src = meta.get("src") or {}
     html = f"""<!doctype html><meta charset="utf-8">
@@ -26,7 +29,7 @@ table{{border-collapse:collapse}} td,th{{border:1px solid #ddd;padding:5px 12px;
 <h1>NSE Relative Strength — daily digest</h1>
 <p class="muted">{meta['gen']} · window {meta['drange']} · {meta['n_window']}/{meta['n_stocks']} stocks in view</p>
 <h2>Market breadth</h2>
-<p>Latest oscillator: <b>{breadth['osc'][-1]:+.1f}</b> · divergence: <b>{div['state']}</b>
+<p>Latest oscillator: <b>{latest}</b> · divergence: <b>{div['state']}</b>
 {div.get('note', '')}</p>
 <h2>Macro RS_STS%</h2>
 <p>{macro['name'] if macro else '—'}: <b>{pct(macro['pct']) if macro else '—'}</b>
