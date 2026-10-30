@@ -73,9 +73,9 @@ def test_ipo_watch_lists_only_unrankable_excluded():
         "IN1": {"2026-09-20": 50.0},
     }
     universe = [
-        {"sym": "NEW1", "name": "New One"},
-        {"sym": "OLD1", "name": "Old One"},
-        {"sym": "IN1", "name": "In View"},
+        {"sym": "NEW1", "name": "New One", "macro": "X"},
+        {"sym": "OLD1", "name": "Old One", "macro": "X"},
+        {"sym": "IN1", "name": "In View", "macro": "X"},
     ]
     ipo = build_ipo_watch(universe, cache, excluded={"NEW1", "OLD1"})
     assert [i["s"] for i in ipo] == ["NEW1"]       # OLD1 has >= WINDOW days, IN1 not excluded
@@ -85,6 +85,17 @@ def test_ipo_watch_lists_only_unrankable_excluded():
     assert "rs" not in ipo[0]                       # no bench given → no chart data
 
 
+def test_ipo_watch_keeps_unclassified_visible():
+    """A stock NSE hasn't classified has no group to rank in — it must stay in
+    New Listings (flagged `uc`) even with a full window of history."""
+    cache = {"UNC": {f"2026-0{i % 9 + 1}-{i % 28 + 1:02d}": 10.0 + i for i in range(50)}}
+    universe = [{"sym": "UNC", "name": "Unclassified", "macro": "", "sector": "",
+                 "industry": "", "basic": ""}]
+    ipo = build_ipo_watch(universe, cache, excluded={"UNC"})
+    assert [i["s"] for i in ipo] == ["UNC"]
+    assert ipo[0]["uc"] is True and ipo[0]["eta"] == 0
+
+
 def test_ipo_watch_embeds_rs_line_when_bench_given():
     """New-listing charts must work even without the /api/stock endpoint
     (static site) — the RS line + EMA21 are embedded in the meta.ipo data."""
@@ -92,7 +103,7 @@ def test_ipo_watch_embeds_rs_line_when_bench_given():
         "NEW1": {"2026-09-20": 100.0, "2026-09-21": 101.0, "2026-09-22": 102.0},
     }
     bench = {"2026-09-20": 500.0, "2026-09-21": 501.0, "2026-09-22": 502.0}
-    universe = [{"sym": "NEW1", "name": "New One"}]
+    universe = [{"sym": "NEW1", "name": "New One", "macro": "X"}]
     ipo = build_ipo_watch(universe, cache, excluded={"NEW1"}, bench=bench)
     e = ipo[0]
     assert e["dates"] == ["2026-09-20", "2026-09-21", "2026-09-22"]

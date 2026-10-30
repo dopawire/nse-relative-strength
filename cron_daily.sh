@@ -11,8 +11,7 @@
 set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-PY=".venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
+. ./find_python.sh
 
 [ -f "$HOME/.config/nse-rs/notify.env" ] && . "$HOME/.config/nse-rs/notify.env"
 
@@ -29,6 +28,12 @@ if [ "${1:-}" = "--if-stale" ]; then
     fi
     echo "[$(date '+%F %T')] cron retry: data stale — rebuilding" >> run.log
 fi
+
+# pick up new NSE listings first (best effort: geo-blocked / no Playwright →
+# they're still added unclassified so the New Listings tab shows them)
+echo "[$(date '+%F %T')] refresh_classification.py" >> run.log
+timeout 900 "$PY" refresh_classification.py >> run.log 2>&1 \
+    || echo "[$(date '+%F %T')] listing refresh failed (rc=$?) — continuing" >> run.log
 
 bash run_daily.sh
 build_rc=$?

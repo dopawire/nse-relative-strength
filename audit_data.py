@@ -137,12 +137,11 @@ def check_data_covers_latest_session():
         return ["price cache empty"]
     today = dt.datetime.now(rs.IST).date()
     now = dt.datetime.now(rs.IST)
-    expected = today
+    # today's own session only counts once it has ended (data settles by
+    # ~16:00) — before that the PREVIOUS session must be present
+    expected = today if now.hour >= 16 else today - dt.timedelta(days=1)
     while expected.weekday() >= 5 or rs.is_holiday(expected.isoformat()):
         expected -= dt.timedelta(days=1)
-    # today's own session only counts once it has ended (data settles by ~16:00)
-    if expected == today and now.hour < 16:
-        return []
     if max(bench) < expected.isoformat():
         return [f"stale: data ends {max(bench)} but the latest session is "
                 f"{expected.isoformat()} (Yahoo published late?)"]

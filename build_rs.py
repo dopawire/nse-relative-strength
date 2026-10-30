@@ -63,6 +63,7 @@ from rs_engine.render import build_html
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
+SYMBOL_CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")  # old,new,isin,date
 
 # Cache file locations (CACHE_DIR itself lives in rs_engine.config).
 PRICE_CACHE  = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # {sym: {date: close}}
@@ -135,6 +136,32 @@ def read_universe():
             if r[key]:
                 r[key] = canon[r[key].lower()]
     return rows
+
+
+def read_symbol_changes():
+    """NSE symbol renames recorded by refresh_classification.py, in file
+    (chronological) order: [(old, new), ...]."""
+    if not os.path.exists(SYMBOL_CHANGES):
+        return []
+    with open(SYMBOL_CHANGES, newline="", encoding="utf-8") as fh:
+        return [((r.get("old") or "").strip().upper(), (r.get("new") or "").strip().upper())
+                for r in csv.DictReader(fh) if r.get("old") and r.get("new")]
+
+
+def stitch_renamed(stores, changes):
+    """Prepend a renamed stock's pre-rename history (old symbol) to its new
+    symbol in each {sym: {date: value}} store — Yahoo often starts the new
+    ticker on the rename day, which would otherwise make an old company look
+    like a fresh listing.  Only dates before the new series begins are added."""
+    for old, new in changes:
+        for store in stores:
+            src, dst = store.get(old), store.get(new)
+            if not src or not dst:
+                continue
+            first = min(dst)
+            for d, v in src.items():
+                if d < first:
+                    dst[d] = v
 
 
 # --------------------------------------------------------------------------- #
@@ -533,6 +560,48 @@ def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None)
     return repaired
 
 
+def fill_stock_gaps(cache, highs, lows, have, today=None):
+    """Per-stock gaps: Yahoo sometimes serves a null daily bar for single
+    symbols (often fresh listings / renamed tickers) on days the market traded
+    normally — enough to drop the stock out of the RS window.  For each of the
+    last WINDOW past sessions, fill listed symbols lacking that day from the
+    NSE bhavcopy (one download per affected day; Indian IPs only).  Returns
+    {date: n_filled}."""
+    if today is None:
+        today = dt.datetime.now(IST).date().isoformat()
+    days = [d for d in sorted(cache.get("__BENCH__", {})) if d < today][-WINDOW:]
+    filled = {}
+    for day in days:
+        # a hole (traded before AND after) or the latest session — suspended
+        # stocks have no later bars, so they don't trigger a download every run
+        gaps = [s for s in have
+                if day not in cache[s] and min(cache[s]) < day
+                and (max(cache[s]) > day or day == days[-1])]
+        if not gaps:
+            continue
+        bhav = fetch_bhavcopy(day)
+        if not bhav:
+            continue
+        n = 0
+        for s in gaps:
+            row = bhav.get(s)
+            if not row:
+                continue                   # genuinely not traded (suspension)
+            cache[s][day] = row["close"]
+            highs.setdefault(s, {})[day] = row["high"]
+            lows.setdefault(s, {})[day] = row["low"]
+            n += 1
+        if n:
+            filled[day] = n
+    if filled:
+        write_json_atomic(PRICE_CACHE, cache)
+        write_json_atomic(HIGH_CACHE, highs)
+        write_json_atomic(LOW_CACHE, lows)
+        print("Filled per-stock Yahoo gaps from NSE bhavcopy: "
+              + ", ".join(f"{d} ({n})" for d, n in filled.items()))
+    return filled
+
+
 # --------------------------------------------------------------------------- #
 #  Investing.com fallback scraper (parses the page's embedded JSON)
 # --------------------------------------------------------------------------- #
@@ -752,6 +821,7 @@ def main():
     cache = load_json_cache(PRICE_CACHE)
     highs = load_json_cache(HIGH_CACHE)
     lows = load_json_cache(LOW_CACHE)
+    changes = read_symbol_changes()
 
     if not args.html_only:
         if args.fast:
@@ -765,10 +835,14 @@ def main():
         else:
             print(f"Fetching from Yahoo ({BENCHMARK_NAME}=^CRSLDX + {len(universe)} "
                   f"stocks): full {FULL_RANGE} history for all (re-validates history) ...")
-        ok, miss = fetch_prices(universe, cache, highs, lows, args.fast)
+        # renamed symbols: also pull the old ticker for its pre-rename history
+        olds = [{"sym": o} for o, _n in changes if not cache.get(o)]
+        ok, miss = fetch_prices(universe + olds, cache, highs, lows, args.fast)
         print(f"Fetched/cached {ok} series; {len(miss)} failures.")
         if miss[:10]:
             print("  sample failures:", miss[:10])
+
+    stitch_renamed((cache, highs, lows), changes)
 
     bench = cache.get("__BENCH__", {})
     if not bench:
@@ -784,6 +858,7 @@ def main():
     if not args.html_only:
         _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
         purge_flat_carries(cache, highs, lows, have)
+        fill_stock_gaps(cache, highs, lows, have)
     # Always persist the sidecar (empty = every bar came from Yahoo) so audit
     # checks and fresh runners see the file.
     write_json_atomic(PROVENANCE, prov)
@@ -824,6 +899,25 @@ def main():
 
     # ---- group members and compute RS for one classification level ----
     skipped_breaks = []
+    stock_cache = {}       # sym -> metrics (shared by all four levels)
+
+    def stock_metrics(u, ser):
+        sym = u["sym"]
+        if sym not in stock_cache:
+            srs, _ = equal_weight_rs([ser], bench, ref_dates)   # single-stock RS
+            st = None
+            if srs is not None:
+                ef, price = ema_flags(ser)
+                brk = last_break_date(ser, 252)   # restart metrics after a demerger
+                st = {"name": u["name"], "sym": sym,
+                      "rs": srs, "pct": percentrank_inc(srs, srs[-1]),
+                      "ema": ef, "ltp": price,
+                      "rse": rs_ema_flag(ser, bench),
+                      "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
+                      "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk)}
+            stock_cache[sym] = st
+        st = stock_cache[sym]
+        return dict(st) if st else None    # copy: deltas are set per member row
 
     def compute(level):
         groups = defaultdict(list)
@@ -846,18 +940,9 @@ def main():
                     skipped_breaks.append(u["sym"])
                     continue
                 series.append(ser)
-                srs, _ = equal_weight_rs([ser], bench, ref_dates)   # single-stock RS
-                if srs is not None:
-                    ef, price = ema_flags(ser)
-                    brk = last_break_date(ser, 252)   # restart metrics after a demerger
-                    stocks.append({"name": u["name"], "sym": u["sym"],
-                                   "rs": srs, "pct": percentrank_inc(srs, srs[-1]),
-                                   "ema": ef, "ltp": price,
-                                   "rse": rs_ema_flag(ser, bench),
-                                   "hi52": pct_off_high(highs.get(u["sym"], {}), price,
-                                                        since=brk),
-                                   "adr": adr_pct(highs.get(u["sym"], {}),
-                                                  lows.get(u["sym"], {}), since=brk)})
+                st = stock_metrics(u, ser)
+                if st is not None:
+                    stocks.append(st)
             if not series:
                 continue
             rs, n = equal_weight_rs(series, bench, ref_dates)
@@ -937,7 +1022,7 @@ def main():
     meta = {
         "drange": f"{ref_dates[0]} → {ref_dates[-1]}" if ref_dates else "n/a",
         "window_dates": ref_dates,
-        "gen": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "gen": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"),   # IST on CI too
         "master_sha": hashlib.sha256(open(MASTER_CSV, "rb").read()).hexdigest(),
         "n_stocks": n_stocks,
         "n_window": n_window,

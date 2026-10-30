@@ -9,8 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-PY=".venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
+. ./find_python.sh
 
 if [ "${1:-}" = "--build" ]; then
     "$PY" build_rs.py
@@ -22,11 +21,16 @@ if [ ! -f rs_data.json ]; then
 fi
 
 gen="$("$PY" -c "import json; print(json.load(open('rs_data.json'))['meta']['gen'])")"
-git add rs_data.json
+# the master too: the cloud fallback build (daily_build.yml) reads the
+# committed universe, so new listings must be pushed for it to see them
+git add rs_data.json nse_stock_master.csv
 if git diff --cached --quiet; then
     echo "rs_data.json unchanged — nothing to publish"
     exit 0
 fi
 git commit -q -m "data snapshot $gen"
+# the cloud workflow also commits snapshots — rebase onto it, keeping ours
+# (-X theirs = the commit being replayed, i.e. this local snapshot)
+git pull -q --rebase --autostash -X theirs
 git push -q
 echo "published: data snapshot $gen (Pages deploy triggered)"

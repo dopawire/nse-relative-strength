@@ -3,8 +3,7 @@
 set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")"   # run from wherever this script lives
 
-PY=".venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
+. ./find_python.sh
 
 ts() { date "+%Y-%m-%d %H:%M:%S %Z"; }
 {

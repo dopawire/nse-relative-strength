@@ -55,6 +55,9 @@ with:
   **NSE official bhavcopy** first (Indian IPs, authoritative closes), then
   Yahoo 5-minute bars. Flat duplicate bars (Yahoo's holiday artifacts) are
   detected and never enter the benchmark.
+- **Single-stock** null bars (common for fresh listings and renamed tickers)
+  inside the RS window are filled from the bhavcopy too, so one missing Yahoo
+  day doesn't drop a stock out of the rankings.
 
 ## Scripts
 
@@ -83,11 +86,20 @@ in the website header.
 
 ### Automation (optional)
 
-`bash install_cron.sh` installs two weekday cron entries (system timezone):
+`bash install_cron.sh` installs the weekday cron entries (system timezone):
 
-- **18:30** — `cron_daily.sh`: daily build + data audit
+- **18:30** — `cron_daily.sh`: new-listing refresh, daily build + data audit
 - **19:30** — `cron_daily.sh --if-stale`: retries once if Yahoo published late
   and the 18:30 run missed the session
+- **hourly + @reboot** — `cron_daily.sh --if-stale`: catch-up when the machine
+  was off at 18:30 (no-op while the data is current)
+
+Each run first calls `refresh_classification.py`, so new NSE listings reach
+the **New Listings** tab the day they trade.  Without a working browser (or
+from a geo-blocked IP) they are added unclassified and classified on a later
+run; renamed symbols (same ISIN) are merged and logged in
+`nse_symbol_changes.csv`, and symbols that left NSE are archived to
+`nse_delisted.csv`.
 
 Optional free Telegram failure alerts: create a bot via @BotFather, then put
 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `~/.config/nse-rs/notify.env`
@@ -96,7 +108,8 @@ every push via GitHub Actions (`.github/workflows/ci.yml`).
 
 ### Public site (free, for everyone)
 
-`bash publish_site.sh` commits the current `rs_data.json` snapshot and pushes —
+`bash publish_site.sh` commits the current `rs_data.json` snapshot (plus the
+stock master, which the cloud fallback build reads) and pushes —
 GitHub Actions deploys it as a **read-only** copy of the dashboard to GitHub
 Pages (works without any backend; Update/Refresh buttons are hidden).  Set
 `PUBLISH_SITE=1` in `~/.config/nse-rs/notify.env` to publish automatically
@@ -112,16 +125,18 @@ python3 build_rs.py --html-only   # rebuild from cache only (no fetching)
 python3 build_rs.py --fast        # incremental top-up (what "Update Prices" uses)
 python3 refresh_classification.py --dry-run   # list new symbols, no browser
 python3 refresh_classification.py --headful  # show the browser window
+python3 refresh_classification.py --stubs-only  # add new listings unclassified
 ```
 
 ## Tests
 
 ```
-.venv/bin/python -m pytest tests/ -q          # all (82)
-.venv/bin/python -m pytest tests/ -q -m smoke # frontend smoke only
-NO_BROWSER=1 .venv/bin/python -m pytest tests/ -q   # skip browser tests
-.venv/bin/python -m ruff check .              # lint (also runs in CI)
-.venv/bin/python audit_data.py                # daily data health check
+PY=~/.venvs/nse-rs/bin/python
+$PY -m pytest tests/ -q          # all (89)
+$PY -m pytest tests/ -q -m smoke # frontend smoke only
+NO_BROWSER=1 $PY -m pytest tests/ -q   # skip browser tests
+$PY -m ruff check .              # lint (also runs in CI)
+$PY audit_data.py                # daily data health check
 ```
 
 Covers the benchmark gap-fill fallback chain (Yahoo index gaps → Investing.com
@@ -134,12 +149,16 @@ server and load the page in headless Chromium.
 ## Setup (first time)
 
 ```
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium       # only needed for refresh_classification.py
-python3 build_rs.py               # initial build
+python3 -m venv ~/.venvs/nse-rs
+~/.venvs/nse-rs/bin/pip install -r requirements.txt -r backend/requirements.txt
+~/.venvs/nse-rs/bin/python -m playwright install chromium   # for refresh_classification.py
+~/.venvs/nse-rs/bin/python build_rs.py                      # initial build
 ```
+
+The venv lives **outside** the repo on purpose: on an NTFS/fuseblk volume the
+exec bits are stripped, so an in-repo `.venv` (and Playwright's bundled
+driver) cannot run.  The shell scripts pick the interpreter via
+`find_python.sh`: `$NSE_RS_PY` → `~/.venvs/nse-rs` → `./.venv` → `python3`.
 
 ## Configuration & layout
 
@@ -147,6 +166,10 @@ python3 build_rs.py               # initial build
   periods, fetch ranges…).  Delete it to use the built-in defaults.
 - `nse_holidays.csv` — the official NSE trading-holiday calendar used by the
   build and the audit.
+- `nse_stock_master.csv` — the universe + 4-level classification;
+  `nse_symbol_changes.csv` (renames — the build stitches the old ticker's
+  history onto the new one) and `nse_delisted.csv` (archived rows) are
+  maintained by `refresh_classification.py`.
 - `rs_engine/` — computation core (config, RS maths, breadth, rotation,
   snapshots, digest, HTML render); `build_rs.py` holds the data layer
   (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.

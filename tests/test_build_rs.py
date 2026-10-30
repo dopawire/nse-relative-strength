@@ -623,6 +623,13 @@ def test_cache_benchmark_recent_values_match_investing(price_cache):
         d: (bench[d], v) for d, v in inv.items()
         if d in bench and abs(bench[d] - v) >= 0.5
     }
+    # Investing.com itself can be off by a point or two; where NSE's official
+    # closing value is reachable it is the authority (cache, inv, official)
+    for d in list(mismatches):
+        official = next((v for k, v in (build_rs.fetch_bhav_indices(d) or {}).items()
+                         if k.strip().lower() == build_rs.BENCHMARK_NAME.lower()), None)
+        if official is not None and abs(bench[d] - official) < 0.5:
+            del mismatches[d]
     assert not mismatches, f"benchmark cache disagrees with Investing.com: {mismatches}"
 
 

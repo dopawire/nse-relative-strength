@@ -37,6 +37,8 @@ import requests
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER = os.path.join(HERE, "nse_stock_master.csv")
+CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")   # old,new,isin,date
+DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
 EQUITY_L = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 FIELDS = ["symbol", "company", "series", "isin",
           "macro", "sector", "industry", "basicIndustry"]
@@ -114,6 +116,86 @@ def parse_equity_text(text):
     return rows
 
 
+def reconcile(master, live, dry_run=False):
+    """Sync the master with NSE's list for symbols that left it.
+      * renamed (same ISIN now trades under another symbol): the row moves to
+        the new symbol, keeping its classification; a duplicate row already
+        added for the new symbol is merged.  Logged to nse_symbol_changes.csv
+        so build_rs.py can stitch the old price history onto the new symbol.
+      * gone (no ISIN match): moved to nse_delisted.csv (archived, not lost).
+    Skipped when the live list looks truncated.  Returns the new master."""
+    if len(live) < 0.9 * len(master):
+        print(f"NSE list has {len(live)} symbols vs master {len(master)} — "
+              f"looks truncated, skipping rename/delisting reconcile.")
+        return master
+    by_isin = {v["isin"]: s for s, v in live.items() if v.get("isin")}
+    by_sym = {r["symbol"].upper(): r for r in master}
+    today = time.strftime("%Y-%m-%d")
+    keep, renames, gone = [], [], []
+    for r in master:
+        sym = r["symbol"].upper()
+        if sym in live:
+            keep.append(r)
+            continue
+        new = by_isin.get(r.get("isin", ""))
+        if new:
+            renames.append({"old": sym, "new": new, "isin": r["isin"], "date": today})
+            dup = by_sym.get(new)
+            if dup is not None:
+                if not (dup.get("macro") or dup.get("sector") or dup.get("basicIndustry")):
+                    for k in ("macro", "sector", "industry", "basicIndustry"):
+                        dup[k] = r.get(k, "")
+                continue                       # the new symbol's row stays
+            r.update(live[new])
+            keep.append(r)
+        else:
+            gone.append(dict(r, delisted_on=today))
+    if renames:
+        print(f"Symbol changes: {', '.join(c['old'] + '→' + c['new'] for c in renames)}")
+    if gone:
+        print(f"No longer on NSE (archived to {os.path.basename(DELISTED)}): "
+              f"{[g['symbol'] for g in gone]}")
+    if dry_run:
+        return master
+    if renames or gone:
+        _append_csv(CHANGES, ["old", "new", "isin", "date"], renames)
+        _append_csv(DELISTED, FIELDS + ["delisted_on"], gone)
+        save_master(keep)
+    return keep
+
+
+def _append_csv(path, fields, rows):
+    if not rows:
+        return
+    new_file = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        if new_file:
+            w.writeheader()
+        w.writerows(rows)
+
+
+def add_stubs(master, live, new_syms):
+    """Append unclassified rows (symbol/company/series/isin) for new listings.
+    They join the universe straight away — so the build prices them and the
+    New Listings tab shows them — and are re-tried as 'unfilled' next run."""
+    for s in new_syms:
+        stub = {k: "" for k in FIELDS}
+        stub.update(live[s])
+        master.append(stub)
+
+
+def save_stubs_and_exit(master, live, new_syms, why):
+    if new_syms:
+        add_stubs(master, live, new_syms)
+        save_master(master)
+        print(f"{why} — added {len(new_syms)} new listing(s) WITHOUT a "
+              f"classification (filled on a later run): {new_syms[:40]}")
+    else:
+        print(f"{why} — no new listings to add.")
+    sys.exit(0)
+
+
 def save_master(rows):
     tmp = MASTER + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
@@ -127,14 +209,18 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", help="list new symbols, no browser")
     ap.add_argument("--headful", action="store_true", help="show the browser window")
+    ap.add_argument("--stubs-only", action="store_true",
+                    help="append new listings without a classification (no browser)")
     args = ap.parse_args()
 
     master = load_master_rows()
-    have = {r["symbol"].upper() for r in master}
 
     # Fast path: plain HTTP.  NSE geo-blocks many IPs (403) — then we fall back
     # to fetching the list inside the validated browser session below.
     live = fetch_equity_list()
+    if live:
+        master = reconcile(master, live, dry_run=args.dry_run)
+    have = {r["symbol"].upper() for r in master}
 
     if args.dry_run:
         if live is None:
@@ -153,11 +239,20 @@ def main():
         print("(dry run — no browser, nothing changed)")
         return
 
+    new_from_http = [s for s in live if s not in have] if live else []
+    if args.stubs_only:
+        if live is None:
+            sys.exit("NSE equity list blocked from this IP — cannot add stubs.")
+        save_stubs_and_exit(master, live, new_from_http, "--stubs-only")
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        sys.exit("Playwright not installed. Run:\n"
-                 "    pip install playwright && playwright install chromium")
+        print("Playwright not installed (pip install playwright && "
+              "playwright install chromium) — classifications can't be fetched.")
+        if live is None:
+            sys.exit(1)
+        save_stubs_and_exit(master, live, new_from_http, "No browser")
 
     filled = 0
     misses = []
@@ -183,7 +278,10 @@ def main():
         if not warmed:
             print("NSE is refusing connections from this IP (HTTP2 reset / geo-block).")
             print("Try a VPN / Indian IP, or skip the refresh for now.")
-            sys.exit(1)
+            browser.close()
+            if live is None:
+                sys.exit(1)
+            save_stubs_and_exit(master, live, new_from_http, "NSE session failed")
 
         if live is None:
             print("Plain HTTP blocked — fetching equity list via browser ...")
@@ -193,6 +291,8 @@ def main():
                 print("Refresh listings from an Indian IP / VPN, or skip for now.")
                 sys.exit(1)
             print(f"Browser fetch OK: {len(live)} symbols.")
+            master = reconcile(master, live)
+            have = {r["symbol"].upper() for r in master}
 
         new_syms = [s for s in live if s not in have]
         # also flag master rows still missing a classification (e.g. earlier misses)
@@ -211,12 +311,8 @@ def main():
             return
 
         # index master rows by symbol for in-place update; add stubs for new ones
+        add_stubs(master, live, new_syms)
         by_sym = {r["symbol"].upper(): r for r in master}
-        for s in new_syms:
-            stub = {k: "" for k in FIELDS}
-            stub.update(live[s])
-            by_sym[s] = stub
-            master.append(stub)
 
         for i, sym in enumerate(todo, 1):
             series = (live.get(sym, {}).get("series")

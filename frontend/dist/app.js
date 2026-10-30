@@ -901,7 +901,7 @@
         <td class="tnum">${i.first}</td>
         <td class="tnum">${i.days}</td>
         <td class="tnum">${utils.fmtPrice(i.ltp)}</td>
-        <td class="tnum">${i.eta} day${i.eta === 1 ? '' : 's'}</td>
+        <td class="tnum">${i.uc ? 'awaiting NSE classification' : `${i.eta} day${i.eta === 1 ? '' : 's'}`}</td>
       </tr>`).join('');
     $.content.innerHTML = `<div class="mbrd-head">New listings — awaiting first ${win}-day ranking
       <span> · stocks appear in the RS tables once they have a full window of prices · click a name for its RS chart</span></div>

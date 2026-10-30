@@ -4,8 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
-PY=".venv/bin/python"
-[ -x "$PY" ] || PY="$(command -v python3)"
+. ./find_python.sh
 
 DATA_FILE="rs_data.json"
 if [ ! -f "$DATA_FILE" ]; then

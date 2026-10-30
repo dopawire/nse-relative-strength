@@ -4,7 +4,7 @@ import os
 import json
 import datetime as dt
 
-from rs_engine.config import CACHE_DIR, WINDOW
+from rs_engine.config import CACHE_DIR, WINDOW, IST
 
 
 SNAPSHOTS = os.path.join(CACHE_DIR, "snapshots.jsonl")   # daily ranking archive
@@ -41,7 +41,7 @@ def append_snapshot(levels, window_end):
             for stock in it["members"]:
                 m[stock["sym"]] = round(stock["pct"], 4)
     line = {"end": window_end,
-            "gen": dt.datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "gen": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
             "g": g, "m": m}
     with open(SNAPSHOTS, "a") as fh:
         fh.write(json.dumps(line, separators=(",", ":")) + "\n")
@@ -49,7 +49,8 @@ def append_snapshot(levels, window_end):
 
 
 def build_ipo_watch(universe, cache, excluded, bench=None):
-    """New listings not yet rankable (< WINDOW days of data): symbol, name,
+    """New listings not yet rankable (< WINDOW days of data) — and stocks NSE
+    hasn't classified yet (`uc`: no group to rank them in): symbol, name,
     first trading day, days of history, LTP, days until first ranking — plus
     the stock's RS line + EMA21 (`bench` given) so the UI can chart them even
     where the /api/stock endpoint isn't available (static site)."""
@@ -60,12 +61,15 @@ def build_ipo_watch(universe, cache, excluded, bench=None):
         if sym not in excluded:
             continue
         ser = cache.get(sym)
-        if not ser or len(ser) >= WINDOW:
+        unclassified = not any(u.get(k) for k in ("macro", "sector", "industry", "basic"))
+        if not ser or (len(ser) >= WINDOW and not unclassified):
             continue
         first = min(ser)
         entry = {"s": sym, "n": u["name"], "first": first,
                  "days": len(ser), "ltp": round(ser[max(ser)], 2),
-                 "eta": WINDOW - len(ser)}
+                 "eta": max(0, WINDOW - len(ser))}
+        if unclassified:
+            entry["uc"] = True
         if bench:
             line = rs_line(ser, bench)
             if line:
