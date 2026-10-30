@@ -7,7 +7,6 @@ Modules:
   rotation  full-history group RS-lines vs the benchmark
   snapshot  daily ranking archive + deltas + IPO watch
   report    printable daily digest
-  render    rs_view.html template + SVG helpers
 
 build_rs.py keeps the data layer (caches, fetchers, gap-fills) and the CLI,
 and re-exports everything here for backwards compatibility.

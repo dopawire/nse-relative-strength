@@ -12,7 +12,7 @@ ts() { date "+%Y-%m-%d %H:%M:%S %Z"; }
   "$PY" build_rs.py
   rc=$?
   if [ $rc -eq 0 ]; then
-    echo "[$(ts)] done -> rs_view.html"
+    echo "[$(ts)] done -> rs_data.json"
   else
     echo "[$(ts)] FAILED (exit $rc)"
   fi

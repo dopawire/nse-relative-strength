@@ -63,7 +63,7 @@ with:
 
 | Script | Purpose |
 |---|---|
-| `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` + `rs_view.html`. |
+| `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` (+ the `daily_report.html` digest). |
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
@@ -171,7 +171,7 @@ driver) cannot run.  The shell scripts pick the interpreter via
   history onto the new one) and `nse_delisted.csv` (archived rows) are
   maintained by `refresh_classification.py`.
 - `rs_engine/` — computation core (config, RS maths, breadth, rotation,
-  snapshots, digest, HTML render); `build_rs.py` holds the data layer
+  snapshots, digest); `build_rs.py` holds the data layer
   (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.
 
 ## Notes
@@ -186,7 +186,7 @@ driver) cannot run.  The shell scripts pick the interpreter via
   likewise Indian-IP-only (it is a fallback, not a requirement).
 - **Price caches live in `~/.cache/nse-rs/`** (override with `NSE_RS_CACHE_DIR`)
   — outside the repo, safe from the fuseblk/NTFS quirks that once corrupted a
-  cache. `rs_view.html` / `daily_report.html` are generated and git-ignored;
+  cache. `daily_report.html` is generated and git-ignored;
   `rs_data.json` is generated too but **committed** — it is the snapshot the
   public site serves.
 - `nse_holidays.csv` is the official NSE trading-holiday calendar — the build

@@ -2,7 +2,7 @@
 """
 Build a Relative-Strength view (like RS.xlsx / image1.png) across all four NSE
 classification levels (Macro, Sector, Industry, Basic Industry), equally
-weighted, rendered as a self-contained HTML file.
+weighted, exported as rs_data.json for the web frontend.
 
 Data source: Yahoo Finance chart API (free, no key, no auth).
 Universe / 4-level map: nse_stock_master.csv (built straight from NSE).
@@ -22,10 +22,10 @@ The price cache grows over time: the first run pulls ~2y per symbol; each
 later run only tops up the last month and appends, so daily runs are fast.
 
 Usage:
-  python3 build_rs.py            # daily run: top-up prices -> rs_view.html
+  python3 build_rs.py            # daily run: fetch prices -> rs_data.json
   python3 build_rs.py --limit 40 # quick test on first 40 stocks
   python3 build_rs.py --refresh  # refetch full history for every symbol
-  python3 build_rs.py --html-only# rebuild HTML from cached prices only
+  python3 build_rs.py --html-only # rebuild outputs from cached prices only (offline)
 """
 
 import os
@@ -59,7 +59,6 @@ from rs_engine.rotation import compute_rotation
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
-from rs_engine.render import build_html
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
@@ -71,7 +70,6 @@ HIGH_CACHE   = os.path.join(CACHE_DIR, ".yh_high_cache.json")    # {sym: {date: 
 LOW_CACHE    = os.path.join(CACHE_DIR, ".yh_low_cache.json")     # {sym: {date: intraday low}}
 PROVENANCE   = os.path.join(CACHE_DIR, ".yh_provenance.json")    # {date: source} for non-Yahoo bars
 BUILD_LOCK   = os.path.join(CACHE_DIR, ".build.lock")
-OUT_HTML     = os.path.join(HERE, "rs_view.html")
 RS_DATA_JSON = os.path.join(HERE, "rs_data.json")
 
 
@@ -792,7 +790,7 @@ def save_rs_json(levels, breadth, meta, path, rotation=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="only use first N stocks (test)")
-    ap.add_argument("--html-only", action="store_true", help="rebuild HTML from cache only")
+    ap.add_argument("--html-only", action="store_true", help="rebuild outputs from cached prices only (no fetching)")
     ap.add_argument("--refresh", action="store_true",
                     help="(default behaviour now; kept for compatibility)")
     ap.add_argument("--fast", action="store_true",
@@ -1043,10 +1041,6 @@ def main():
         "src": prov,
         "ipo": ipo,
     }
-    page = build_html(levels, meta, breadth)
-    with open(OUT_HTML, "w", encoding="utf-8") as fh:
-        fh.write(page)
-    print(f"Wrote {OUT_HTML}")
     save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation)
     print(f"Wrote {RS_DATA_JSON}")
     write_daily_report(os.path.join(HERE, "daily_report.html"),

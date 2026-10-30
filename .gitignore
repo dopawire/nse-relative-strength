@@ -6,7 +6,6 @@ __pycache__/
 *.pyc
 
 # generated output + price caches (rebuilt by build_rs.py)
-rs_view.html
 site/
 daily_report.html
 .yh_price_cache.json
