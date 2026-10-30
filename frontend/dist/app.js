@@ -916,14 +916,14 @@
         <td class="tnum">${i.ret != null ? pct(i.ret) : '—'}</td>
         <td class="tnum">${i.bret != null ? pct(i.bret) : '—'}</td>
         <td class="tnum ipo-x">${i.xret != null ? pct(i.xret) : '—'}</td>
-        <td class="tnum">${i.uc ? 'awaiting NSE classification' : `${i.eta} day${i.eta === 1 ? '' : 's'}`}</td>
+        <td class="tnum"${i.uc ? '' : ` title="${i.days} of ${win} sessions so far — gets a full ${win}-day RS ranking and joins its group's RS index after ${i.eta} more"`}>${i.uc ? 'awaiting NSE classification' : `${i.eta} session${i.eta === 1 ? '' : 's'}`}</td>
       </tr>`).join('');
       return `<div class="ipo-sec">${title} <span>${list.length} · ${note}</span></div>
         <table class="ipo-table"><thead><tr>
           <th>#</th><th>Stock</th><th>Listed</th><th>Days</th><th title="close on the listing day">Listing close</th>
           <th>LTP</th><th title="LTP vs listing-day close">Since listing</th>
           <th title="NIFTY 500 over the same dates">NIFTY 500</th>
-          <th title="(1 + stock) / (1 + NIFTY 500) − 1">vs NIFTY 500</th><th>Ranked in</th>
+          <th title="(1 + stock) / (1 + NIFTY 500) − 1">vs NIFTY 500</th><th title="Trading sessions until the stock has a full ${win}-day window: it then gets a regular RS_STS% ranking, counts in its group's RS index and leaves this tab">Full RS in</th>
         </tr></thead><tbody>${rows}</tbody></table>`;
     };
     const measured = shown.filter(i => i.xret != null);
