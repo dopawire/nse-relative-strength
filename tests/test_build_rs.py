@@ -640,9 +640,9 @@ def test_group_index_uses_only_listed_members(rs_data):
         for g in lv["groups"]:
             ranked = [m for m in g["members"] if not m.get("nw")]
             assert g["n"] == len(ranked), (lv["key"], g["name"])
-            # new listings are listed after the ranked stocks
-            flags = [bool(m.get("nw")) for m in g["members"]]
-            assert flags == sorted(flags), (lv["key"], g["name"])
+            # one ordering by RS% — new listings interleaved, not parked last
+            pcts = [m["p"] for m in g["members"]]
+            assert pcts == sorted(pcts, reverse=True), (lv["key"], g["name"])
 
 
 def test_new_listings_appear_in_every_level(rs_data):

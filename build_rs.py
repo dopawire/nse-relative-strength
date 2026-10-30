@@ -966,7 +966,7 @@ def main():
             rs, n = equal_weight_rs(series, bench, ref_dates)
             if rs is None:
                 continue
-            stocks.sort(key=lambda x: (bool(x["new"]), -x["pct"]))   # new listings last
+            stocks.sort(key=lambda x: x["pct"], reverse=True)   # new listings by RS% too
             out.append({"name": gname, "n": n, "rs": rs,
                         "pct": percentrank_inc(rs, rs[-1]), "members": stocks})
         out.sort(key=lambda x: x["pct"], reverse=True)

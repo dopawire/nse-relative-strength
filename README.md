@@ -31,8 +31,8 @@ with:
   (the issue price isn't in the free data, so the listing-day close is the
   base).  They also
   appear inside their Macro / Sector / Industry / Basic Industry groups,
-  badged **NEW · Nd** and ranked over their days since listing — listed after
-  the ranked stocks and kept out of the group index until they have a full
+  badged **NEW · Nd** and ranked over their days since listing — sorted by
+  RS% together with the other stocks, but kept out of the group index until they have a full
   window (so a 2-day-old stock can't swing its group).
 - A printable **daily digest** (`daily_report.html`) after every build.
 
