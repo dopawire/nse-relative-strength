@@ -22,6 +22,7 @@
     watchlist: loadWatchlist(),   // localStorage star list
     watchlistOnly: false,
     rotationData: null,   // cached rotation RS-lines
+    rotRange: '6M',       // rotation period: ~2px per session → every day hoverable
     selected: new Set(), // selected symbols for TradingView export
     breadthData: null,   // cached breadth oscillator data
     theme: 'dark',
@@ -832,15 +833,26 @@
     });
   }
 
+  // sessions per period; a 340px card holds ~280px of plot, so beyond ~1Y a
+  // single pixel spans several sessions and hover can't reach each day
+  const ROT_RANGES = { '3M': 63, '6M': 126, '1Y': 252, 'All': Infinity };
+
   function drawRotation(data) {
-    const dates = data.dates || [];
+    const allDates = data.dates || [];
     const groups = data.groups || [];
     if (!groups.length) {
       $.content.innerHTML = '<div class="brd-empty">No rotation data yet — run a build.</div>';
       return;
     }
+    // period slice, rebased to 1.0 at its first session
+    const start = Math.max(0, allDates.length - ROT_RANGES[state.rotRange]);
+    const dates = allDates.slice(start);
+    const sliced = groups.map(g => {
+      const base = g.rs[start] || 1;
+      return g.rs.slice(start).map(v => v / base);
+    });
     const cards = groups.map((g, i) => {
-      const rs = g.rs;
+      const rs = sliced[i];
       const total = ((rs[rs.length - 1] / rs[0]) - 1) * 100;
       const pos = total >= 0;
       return `<div class="macro-card">
@@ -854,12 +866,19 @@
           <div class="mtip" id="rot-tip-${i}"></div></div>
       </div>`;
     }).join('');
+    const pills = Object.keys(ROT_RANGES).map(k =>
+      `<button type="button" class="rot-range${k === state.rotRange ? ' on' : ''}" data-range="${k}">${k}</button>`).join('');
     $.content.innerHTML = `<div class="mbrd-head">Sector rotation — RS vs NIFTY 500
-      <span> · chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 at ${dates[0] || 'start'} · hover for values</span></div>
+      <span class="rot-ranges">${pills}</span>
+      <span> · chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 at ${dates[0] || 'start'} · ${dates.length} sessions, one point per trading day · hover for values</span></div>
       <div class="macro-grid">${cards}</div>`;
     groups.forEach((g, i) => {
-      bindLineChart('rot-' + i, dates, g.rs, null, document.getElementById('rot-tip-' + i));
+      bindLineChart('rot-' + i, dates, sliced[i], null, document.getElementById('rot-tip-' + i));
     });
+    $.content.querySelectorAll('.rot-range').forEach(b => b.addEventListener('click', () => {
+      state.rotRange = b.dataset.range;
+      drawRotation(data);
+    }));
   }
 
   // Multi-word search: every token must appear in name or symbol
@@ -944,7 +963,7 @@
   function lineChartSVG(vals, ema, uid, W, H) {
     const L = 8, R = 52, T = 10, B = 14;
     const ph = H - T - B, pw = W - L - R;
-    const step = Math.max(1, Math.floor(vals.length / 100));   // downsample
+    const step = 1;   // every session is drawn and hoverable (no downsampling)
     const idx = [];
     for (let k = 0; k < vals.length; k += step) idx.push(k);
     if (idx[idx.length - 1] !== vals.length - 1) idx.push(vals.length - 1);
@@ -957,13 +976,8 @@
     const n = v.length;
     const X = k => L + pw * k / (n - 1);
     const Y = x => T + ph * (1 - (x - y0) / (y1 - y0));
-    const seg = (arr, col, w) => {
-      let p = '';
-      for (let k = 1; k < arr.length; k++) {
-        p += `<line x1="${X(k - 1).toFixed(1)}" y1="${Y(arr[k - 1]).toFixed(1)}" x2="${X(k).toFixed(1)}" y2="${Y(arr[k]).toFixed(1)}" stroke="${col}" stroke-width="${w}"/>`;
-      }
-      return p;
-    };
+    const seg = (arr, col, w) =>       // one polyline: cheap even for ~550 points
+      `<polyline fill="none" stroke="${col}" stroke-width="${w}" stroke-linejoin="round" points="${arr.map((y, k) => `${X(k).toFixed(1)},${Y(y).toFixed(1)}`).join(' ')}"/>`;
     const blue = state.theme === 'dark' ? '#60a5fa' : '#2563eb';
     const amber = state.theme === 'dark' ? '#fbbf24' : '#b45309';
     const muted = state.theme === 'dark' ? '#9ca3af' : '#7a8794';

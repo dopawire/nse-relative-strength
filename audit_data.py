@@ -88,10 +88,9 @@ def check_flat_days(cache, symbols=None):
         for day in cache[s]:
             cov[day] = cov.get(day, 0) + 1
     issues = []
+    fake = rs.fake_flat_days(cache, have)
     for day in sorted(cov):
-        if not (0.5 * n < cov[day] < 0.98 * n):
-            continue
-        if rs.is_fake_flat_day(cache, have, day):
+        if day in fake and cov[day] > 0.5 * n:
             if day in bench:
                 issues.append(f"{day}: fake flat bars IN the benchmark")
             else:

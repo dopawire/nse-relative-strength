@@ -463,3 +463,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .ipo-table td.ipo-x{font-weight:650}
 .ipo-table td.ipo-rank{color:var(--text-muted);width:28px}
 .ipo-table td.tnum{white-space:nowrap}
+.rot-ranges{margin:0 6px 0 10px;display:inline-flex;gap:4px;vertical-align:middle}
+.rot-range{font:inherit;font-size:11px;padding:2px 9px;border-radius:10px;cursor:pointer;
+  border:1px solid var(--border);background:transparent;color:var(--text-muted)}
+.rot-range.on{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}

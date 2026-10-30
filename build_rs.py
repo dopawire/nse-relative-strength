@@ -42,7 +42,7 @@ import argparse
 import datetime as dt
 import threading
 import concurrent.futures as cf
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 import requests
 
@@ -70,6 +70,9 @@ PRICE_CACHE  = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # {sym: {date: 
 HIGH_CACHE   = os.path.join(CACHE_DIR, ".yh_high_cache.json")    # {sym: {date: intraday high}}
 LOW_CACHE    = os.path.join(CACHE_DIR, ".yh_low_cache.json")     # {sym: {date: intraday low}}
 PROVENANCE   = os.path.join(CACHE_DIR, ".yh_provenance.json")    # {date: source} for non-Yahoo bars
+OFFICIAL_FILLS = os.path.join(CACHE_DIR, ".nse_official_fills.json")
+# {sym: {date: [close, high, low, ref_date, ref_official_close]}} — bars filled
+# from the NSE bhavcopy, re-scaled to Yahoo's adjusted series every run
 BUILD_LOCK   = os.path.join(CACHE_DIR, ".build.lock")
 RS_DATA_JSON = os.path.join(HERE, "rs_data.json")
 
@@ -424,30 +427,18 @@ def purge_flat_carries(cache, highs, lows, have):
     +1.8% — a data-pipeline failure day).  For any date where >90% of the
     bars are flat duplicates, drop the flat bars so they can't distort
     EMA/ADR metrics; genuine movers on the day are kept.  Returns purged dates."""
-    cov = {}
+    fake = fake_flat_days(cache, have)
+    removed = Counter()
     for s in have:
-        for d in cache.get(s, {}):
-            cov[d] = cov.get(d, 0) + 1
-    n = len(have) or 1
-    purged = []
-    for day in sorted(cov):
-        if not (0.5 * n < cov[day] < 0.98 * n):
-            continue
-        if not is_fake_flat_day(cache, have, day):
-            continue
-        removed = 0
-        for s in have:
-            ser = cache.get(s, {})
-            if day not in ser:
-                continue
-            prevs = [d for d in ser if d < day]
-            if prevs and ser[day] == ser[prevs[-1]]:
-                del ser[day]
-                highs.get(s, {}).pop(day, None)
-                lows.get(s, {}).pop(day, None)
-                removed += 1
-        if removed:
-            purged.append(day)
+        ser = cache.get(s, {})
+        ds = sorted(ser)
+        for a, b in zip(ds, ds[1:]):
+            if b in fake and ser[b] == ser[a]:     # flat vs the PREVIOUS bar
+                del ser[b]
+                highs.get(s, {}).pop(b, None)
+                lows.get(s, {}).pop(b, None)
+                removed[b] += 1
+    purged = sorted(removed)
     if purged:
         write_json_atomic(PRICE_CACHE, cache)
         write_json_atomic(HIGH_CACHE, highs)
@@ -506,16 +497,14 @@ def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None)
             if bench_val and (bench_missing or abs(bench[day] / bench_val - 1) > 0.01):
                 cache["__BENCH__"][day] = bench_val
                 filled += 1
-            for s in have:
-                if day in cache.get(s, {}):
-                    continue
-                row = bhav.get(s)
-                if not row:
-                    continue
-                cache.setdefault(s, {})[day] = row["close"]
-                highs.setdefault(s, {})[day] = row["high"]
-                lows.setdefault(s, {})[day] = row["low"]
-                filled += 1
+            # stock bars: recorded + applied split/bonus-scaled (raw bhavcopy
+            # prices don't match Yahoo's adjusted history)
+            fills = load_json_cache(OFFICIAL_FILLS)
+            filled += record_official_bars(
+                cache, day, [s for s in have if day not in cache.get(s, {})], fills,
+                bhavcopy_memo({day: bhav}))
+            apply_official_bars(cache, highs, lows, fills)
+            write_json_atomic(OFFICIAL_FILLS, fills)
             if filled:
                 repaired.append(day)
                 if prov is not None:
@@ -556,46 +545,99 @@ def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None)
     return repaired
 
 
-def fill_stock_gaps(cache, highs, lows, have, today=None):
+def bhavcopy_memo(seed=None):
+    """bhav_for(day) → fetch_bhavcopy(day), downloading each day once per run."""
+    memo = dict(seed or {})
+
+    def bhav_for(day):
+        if day not in memo:
+            memo[day] = fetch_bhavcopy(day)
+        return memo[day]
+    return bhav_for
+
+
+def record_official_bars(cache, day, syms, fills, bhav_for):
+    """Record NSE bhavcopy bars for `syms` on `day` into `fills`, each with a
+    reference day on which Yahoo also has a close.  The bhavcopy is RAW while
+    Yahoo's history is split/bonus-ADJUSTED (HDFCBANK: 1710 vs 855), so a bar
+    is only usable scaled by yahoo/official on the reference day — see
+    apply_official_bars.  `bhav_for(day)` returns a (memoised) bhavcopy.
+    Returns how many were recorded."""
+    bhav = bhav_for(day)
+    if not bhav:
+        return 0
+    n = 0
+    for s in syms:
+        row, ser = bhav.get(s), cache.get(s, {})
+        if not row:
+            continue                           # genuinely not traded (suspension)
+        later = sorted(d for d in ser if d > day)[:3]
+        earlier = sorted((d for d in ser if d < day), reverse=True)[:3]
+        for ref in later + earlier:            # nearest day both sources have
+            ref_row = (bhav_for(ref) or {}).get(s)
+            if ref_row:
+                fills.setdefault(s, {})[day] = [row["close"], row["high"], row["low"],
+                                                ref, ref_row["close"]]
+                n += 1
+                break
+    return n
+
+
+def apply_official_bars(cache, highs, lows, fills):
+    """Write every recorded official bar into the caches, scaled by Yahoo's
+    close / the official close on its reference day — so a split or bonus
+    after the fill is followed too.  Returns how many bars were written."""
+    n = 0
+    for s, days in fills.items():
+        ser = cache.get(s)
+        if not ser:
+            continue
+        for day, (c, h, lw, ref, ref_c) in days.items():
+            if ref not in ser or not ref_c:
+                continue
+            k = ser[ref] / ref_c
+            ser[day] = round(c * k, 4)
+            highs.setdefault(s, {})[day] = round(h * k, 4)
+            lows.setdefault(s, {})[day] = round(lw * k, 4)
+            n += 1
+    return n
+
+
+def fill_stock_gaps(cache, highs, lows, have, today=None, extra_days=()):
     """Per-stock gaps: Yahoo sometimes serves a null daily bar for single
-    symbols (often fresh listings / renamed tickers) on days the market traded
-    normally — enough to drop the stock out of the RS window.  For each of the
-    last WINDOW past sessions, fill listed symbols lacking that day from the
-    NSE bhavcopy (one download per affected day; Indian IPs only).  Returns
-    {date: n_filled}."""
+    symbols (fresh listings, renamed tickers) or a stale one (purged outage
+    days such as 2025-03-18) on days the market traded.  For the last WINDOW
+    past sessions plus `extra_days`, holes (traded before AND after, or the
+    latest session) are recorded from the NSE bhavcopy (Indian IPs only),
+    then every recorded bar is (re)applied, scaled to Yahoo's adjusted
+    series.  Returns {date: n_newly_recorded}."""
     if today is None:
         today = dt.datetime.now(IST).date().isoformat()
+    fills = load_json_cache(OFFICIAL_FILLS)
     days = [d for d in sorted(cache.get("__BENCH__", {})) if d < today][-WINDOW:]
-    filled = {}
+    days = sorted(set(days) | {d for d in extra_days if d < today})
+    bhav_for = bhavcopy_memo()
+    recorded = {}
     for day in days:
-        # a hole (traded before AND after) or the latest session — suspended
-        # stocks have no later bars, so they don't trigger a download every run
+        # suspended stocks have no later bars → no download every run
         gaps = [s for s in have
-                if day not in cache[s] and min(cache[s]) < day
+                if day not in cache[s] and day not in fills.get(s, {})
+                and min(cache[s]) < day
                 and (max(cache[s]) > day or day == days[-1])]
-        if not gaps:
-            continue
-        bhav = fetch_bhavcopy(day)
-        if not bhav:
-            continue
-        n = 0
-        for s in gaps:
-            row = bhav.get(s)
-            if not row:
-                continue                   # genuinely not traded (suspension)
-            cache[s][day] = row["close"]
-            highs.setdefault(s, {})[day] = row["high"]
-            lows.setdefault(s, {})[day] = row["low"]
-            n += 1
-        if n:
-            filled[day] = n
-    if filled:
+        if gaps:
+            n = record_official_bars(cache, day, gaps, fills, bhav_for)
+            if n:
+                recorded[day] = n
+    if fills:
+        apply_official_bars(cache, highs, lows, fills)
+        write_json_atomic(OFFICIAL_FILLS, fills)
         write_json_atomic(PRICE_CACHE, cache)
         write_json_atomic(HIGH_CACHE, highs)
         write_json_atomic(LOW_CACHE, lows)
+    if recorded:
         print("Filled per-stock Yahoo gaps from NSE bhavcopy: "
-              + ", ".join(f"{d} ({n})" for d, n in filled.items()))
-    return filled
+              + ", ".join(f"{d} ({n})" for d, n in recorded.items()))
+    return recorded
 
 
 # --------------------------------------------------------------------------- #
@@ -665,25 +707,26 @@ def _scrape_investing_com():
     return out if out else None
 
 
-def is_fake_flat_day(cache, have, day, sample=300):
-    """Yahoo sometimes emits flat duplicate bars on NSE holidays (100% of stock
-    bars equal the previous close) and stale carries on pipeline-outage days.
-    Real trading days virtually never have >90% flat closes.  Returns True when
-    the day looks fake — such dates must never be filled into the benchmark."""
-    flat = moved = 0
+def fake_flat_days(cache, have, sample=300):
+    """Dates whose stock bars are >90% flat duplicates of each stock's
+    PREVIOUS bar (sorted by date): Yahoo's holiday artifacts and stale-carry
+    outage days (2025-03-18).  One pass over a sample of symbols.  Real
+    trading days virtually never have >90% flat closes."""
+    flat, total = Counter(), Counter()
     for s in have[:sample]:
-        ser = cache.get(s, {})
-        if day not in ser:
-            continue
-        prevs = [d for d in ser if d < day]
-        if not prevs:
-            continue
-        if ser[day] == ser[prevs[-1]]:
-            flat += 1
-        else:
-            moved += 1
-    total = flat + moved
-    return total >= 100 and flat / total > 0.9
+        ser = cache.get(s) or {}
+        ds = sorted(ser)
+        for a, b in zip(ds, ds[1:]):
+            total[b] += 1
+            if ser[b] == ser[a]:
+                flat[b] += 1
+    return {d for d, n in total.items() if n >= 100 and flat[d] / n > 0.9}
+
+
+def is_fake_flat_day(cache, have, day, sample=300):
+    """True when `day` looks fake (see fake_flat_days) — such dates must never
+    be filled into the benchmark."""
+    return day in fake_flat_days(cache, have, sample)
 
 
 def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
@@ -857,8 +900,8 @@ def main():
     prov = load_json_cache(PROVENANCE)
     if not args.html_only:
         _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
-        purge_flat_carries(cache, highs, lows, have)
-        fill_stock_gaps(cache, highs, lows, have)
+        purged = purge_flat_carries(cache, highs, lows, have)
+        fill_stock_gaps(cache, highs, lows, have, extra_days=purged)
     # Always persist the sidecar (empty = every bar came from Yahoo) so audit
     # checks and fresh runners see the file.
     write_json_atomic(PROVENANCE, prov)

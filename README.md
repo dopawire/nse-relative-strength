@@ -24,7 +24,8 @@ with:
   **per-macro breadth dashboard** — the same oscillator computed for each of
   the macro groups as a card grid with hover tooltips and RS% badges, and
   **divergence alerts** (index at highs while breadth fades, and the reverse).
-- **Rotation** tab — full-history RS lines per sector vs NIFTY 500.
+- **Rotation** tab — daily RS lines per sector vs NIFTY 500 (one point per
+  trading session), with a 3M / 6M / 1Y / All period selector.
 - **New Listings** tab — IPOs awaiting their first 26-day ranking, split into
   **Outperformers** (best first) and **Underperformers** (worst first) by
   their return since the listing-day close vs NIFTY 500 over the same dates
@@ -63,6 +64,10 @@ with:
   **NSE official bhavcopy** first (Indian IPs, authoritative closes), then
   Yahoo 5-minute bars. Flat duplicate bars (Yahoo's holiday artifacts) are
   detected and never enter the benchmark.
+- Days where Yahoo served stale, unchanged prices (2025-03-18) are purged and
+  refilled from the bhavcopy; bhavcopy prices are raw, so every filled bar is
+  scaled to Yahoo's split/bonus-adjusted series and re-scaled on later
+  adjustments (`~/.cache/nse-rs/.nse_official_fills.json`).
 - **Single-stock** null bars (common for fresh listings and renamed tickers)
   inside the RS window are filled from the bhavcopy too, so one missing Yahoo
   day doesn't drop a stock out of the rankings.

@@ -263,6 +263,22 @@ def test_purge_flat_carries_keeps_real_movers(monkeypatch, tmp_path):
     assert cache["M0"]["2025-03-18"] == 102.0       # real mover kept
 
 
+def test_purge_compares_with_previous_trading_bar(monkeypatch, tmp_path):
+    """Cache dicts are merged in arbitrary order: the flat test must use the
+    PREVIOUS date, not the last-inserted earlier one (that left 919 stale
+    2025-03-18 bars behind), and full-coverage outage days count too."""
+    for name in ("PRICE_CACHE", "HIGH_CACHE", "LOW_CACHE"):
+        monkeypatch.setattr(build_rs, name, str(tmp_path / f"{name}.json"))
+    from build_rs import purge_flat_carries
+    cache = {}
+    for i in range(150):                       # every stock has the day (100% coverage)
+        ser = {"2025-03-17": 100.0 + i, "2025-03-18": 100.0 + i}   # stale carry
+        ser["2025-03-13"] = 90.0               # inserted LAST, but an earlier date
+        cache[f"S{i}"] = ser
+    assert purge_flat_carries(cache, {}, {}, sorted(cache)) == ["2025-03-18"]
+    assert all("2025-03-18" not in v for v in cache.values())
+
+
 def test_fetch_bhavcopy_blocked_returns_none(monkeypatch):
     patch_session(monkeypatch, FakeSession(FakeResp(403, text="denied")))
     assert fetch_bhavcopy("2026-08-28") is None
@@ -274,9 +290,9 @@ def test_repair_prefers_bhavcopy_and_tags_provenance(monkeypatch, tmp_path):
     monkeypatch.setattr(build_rs, "HIGH_CACHE", str(tmp_path / "h.json"))
     monkeypatch.setattr(build_rs, "LOW_CACHE", str(tmp_path / "l.json"))
     cache = {"__BENCH__": {"2026-08-27": 20000.0}, "AAA": {"2026-08-27": 100.0}}
-    monkeypatch.setattr(build_rs, "fetch_bhavcopy", lambda day: (
-        {"AAA": {"close": 101.0, "high": 102.0, "low": 99.0}}
-        if day == "2026-08-28" else None))
+    official = {"2026-08-27": {"AAA": {"close": 100.0, "high": 100.0, "low": 100.0}},
+                "2026-08-28": {"AAA": {"close": 101.0, "high": 102.0, "low": 99.0}}}
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", official.get)   # 27th = scale ref
     monkeypatch.setattr(build_rs, "fetch_bhav_indices", lambda day: (
         {"Nifty 500": 20100.0} if day == "2026-08-28" else None))
 

@@ -203,3 +203,21 @@ def test_deep_link_opens_new_listings_ranked(server, browser):
     page.wait_for_timeout(800)
     assert page.query_selector('.tab.active[data-tab="rotation"]') is not None
     ctx.close()
+
+
+@skip_browser
+def test_rotation_draws_every_session(server, browser):
+    """Rotation charts are daily: one point per session (no downsampling) —
+    6M by default so each day is hoverable, All draws the full history."""
+    import json
+    n_all = len(json.loads((ROOT / "rs_data.json").read_text())["rotation"]["dates"])
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    page.goto(server + "/#/rotation", wait_until="networkidle", timeout=30000)
+    page.wait_for_selector("#rot-0 polyline")
+    count = "e => e.getAttribute('points').trim().split(' ').length"
+    assert page.eval_on_selector("#rot-0 polyline", count) == min(126, n_all)
+    page.click(".rot-range[data-range='All']")
+    page.wait_for_timeout(300)
+    assert page.eval_on_selector("#rot-0 polyline", count) == n_all
+    ctx.close()

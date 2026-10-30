@@ -1,6 +1,8 @@
 """Tests for new-listing / rename / delisting handling and per-stock gap fills."""
 import csv
 
+import pytest
+
 import build_rs
 import refresh_classification as rc
 
@@ -65,6 +67,15 @@ def test_stitch_renamed_prepends_history_only():
                             "2026-01-03": 12.0, "2026-01-04": 13.0}
 
 
+def _official(prices):
+    """fake fetch_bhavcopy over {day: {sym: close}} (high/low = close ± 1)."""
+    def fetch(day):
+        rows = prices.get(day)
+        return {s: {"close": c, "high": c + 1, "low": c - 1}
+                for s, c in rows.items()} if rows else None
+    return fetch
+
+
 def test_fill_stock_gaps_fills_holes_not_suspensions(tmp_path, monkeypatch):
     for name in ("PRICE_CACHE", "HIGH_CACHE", "LOW_CACHE"):
         monkeypatch.setattr(build_rs, name, str(tmp_path / f"{name}.json"))
@@ -73,20 +84,38 @@ def test_fill_stock_gaps_fills_holes_not_suspensions(tmp_path, monkeypatch):
              "HOLE": {"2026-10-27": 1.0, "2026-10-29": 3.0},     # 28th missing
              "LATEST": {"2026-10-27": 1.0, "2026-10-28": 2.0},   # 29th missing
              "SUSP": {"2026-10-27": 1.0}}                         # suspended
-    calls = []
-
-    def fake_bhav(day):
-        calls.append(day)
-        return {s: {"close": 5.0, "high": 6.0, "low": 4.0} for s in ("HOLE", "LATEST")}
-
-    monkeypatch.setattr(build_rs, "fetch_bhavcopy", fake_bhav)
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", _official({
+        "2026-10-27": {"HOLE": 1.0, "LATEST": 1.0, "SUSP": 1.0},
+        "2026-10-28": {"HOLE": 2.0, "LATEST": 2.0},
+        "2026-10-29": {"HOLE": 3.0, "LATEST": 2.5}}))
     highs, lows = {}, {}
     filled = build_rs.fill_stock_gaps(cache, highs, lows, ["HOLE", "LATEST", "SUSP"],
                                       today="2026-10-30")
     assert filled == {"2026-10-28": 1, "2026-10-29": 1}
-    assert cache["HOLE"]["2026-10-28"] == 5.0 and highs["HOLE"]["2026-10-28"] == 6.0
-    assert cache["LATEST"]["2026-10-29"] == 5.0
+    assert cache["HOLE"]["2026-10-28"] == 2.0 and highs["HOLE"]["2026-10-28"] == 3.0
+    assert cache["LATEST"]["2026-10-29"] == 2.5
     assert "2026-10-28" not in cache["SUSP"]          # no later bar → not a hole
+
+
+def test_official_fill_follows_yahoo_split_adjustment(tmp_path, monkeypatch):
+    """The bhavcopy is RAW, Yahoo's history split/bonus-ADJUSTED: a filled bar
+    must be scaled to Yahoo's level (HDFCBANK 1:1 bonus: 1732 raw → 866), and
+    re-scaled when Yahoo later adjusts its history again."""
+    for name in ("PRICE_CACHE", "HIGH_CACHE", "LOW_CACHE"):
+        monkeypatch.setattr(build_rs, name, str(tmp_path / f"{name}.json"))
+    cache = {"__BENCH__": {"2025-03-17": 1.0, "2025-03-18": 1.0, "2025-03-19": 1.0},
+             "HDFC": {"2025-03-17": 855.2, "2025-03-19": 872.05}}   # Yahoo: adjusted
+    monkeypatch.setattr(build_rs, "fetch_bhavcopy", _official({
+        "2025-03-17": {"HDFC": 1710.4}, "2025-03-18": {"HDFC": 1732.2},
+        "2025-03-19": {"HDFC": 1744.1}}))                           # NSE: raw
+    highs, lows = {}, {}
+    build_rs.fill_stock_gaps(cache, highs, lows, ["HDFC"], today="2025-03-20",
+                             extra_days=["2025-03-18"])
+    assert cache["HDFC"]["2025-03-18"] == pytest.approx(866.1, abs=0.01)
+    # a later 1:2 split: Yahoo re-adjusts its own bars; ours must follow
+    cache["HDFC"] = {d: v / 2 for d, v in cache["HDFC"].items() if d != "2025-03-18"}
+    build_rs.fill_stock_gaps(cache, highs, lows, ["HDFC"], today="2025-03-20")
+    assert cache["HDFC"]["2025-03-18"] == pytest.approx(433.05, abs=0.01)
 
 
 def test_sync_holidays_adds_weekdays_only(tmp_path, monkeypatch):
