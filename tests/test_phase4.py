@@ -149,3 +149,27 @@ def test_daily_report_survives_missing_breadth(tmp_path):
         out = tmp_path / "report.html"
         write_daily_report(str(out), meta, breadth, [], [])
         assert "Latest oscillator: <b>n/a</b>" in out.read_text()
+
+
+def test_divergence_ignores_same_run_yesterday():
+    """A rally where breadth dips one day at the top is not a divergence: the
+    'previous peak' must be an earlier swing, not yesterday in the same run."""
+    dates = [f"2026-06-{d:02d}" for d in range(1, 28)]
+    bench = {d: 20000.0 + i * 100 for i, d in enumerate(dates)}   # steady rally
+    osc = [10.0] * len(dates)
+    osc[-2] = 12.0                    # yesterday's breadth a touch higher
+    assert detect_breadth_divergence(bench, dates, osc)["state"] == "none"
+
+
+def test_rotation_skips_corporate_action_jumps():
+    """A demerger-style one-day jump must not shift the chain-linked line."""
+    universe, cache, bench, dates = _bench_and_stocks()
+    flat = {f"F{i}": {d: 100.0 for d in dates} for i in range(5)}
+    for d in dates[30:]:
+        flat["F0"][d] = 300.0                     # +200% "day" — corporate action
+    cache.update(flat)
+    universe += [{"sym": s, "sector": "Flat", "name": s} for s in flat]
+    flat_bench = {d: 100.0 for d in dates}
+    rot = compute_rotation(universe, cache, flat_bench, dates, level="sector")
+    rs = next(g["rs"] for g in rot["groups"] if g["name"] == "Flat")
+    assert rs[-1] == 1.0

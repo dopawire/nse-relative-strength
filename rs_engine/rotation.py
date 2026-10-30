@@ -2,11 +2,15 @@
 
 from collections import defaultdict
 
+from rs_engine.config import CORP_ACTION_JUMP
+
 
 def compute_rotation(universe, cache, bench, covered_dates, level="sector"):
     """Full-history RS line per group (chain-linked equal-weight index vs the
     benchmark, both rebased to 1.0 at the first covered date).  Handles stocks
-    listing/delisting mid-history via daily cross-sectional returns.  Returns
+    listing/delisting mid-history via daily cross-sectional returns; a move
+    beyond CORP_ACTION_JUMP is a corporate action (demerger…), not
+    performance, and is left out — chain-linking would make it permanent.  Returns
     {"dates": [...], "groups": [{"name", "rs"} ...]} for the rotation view."""
     by_group = defaultdict(list)
     for u in universe:
@@ -18,8 +22,9 @@ def compute_rotation(universe, cache, bench, covered_dates, level="sector"):
         idx = [100.0]
         for i in range(1, len(covered_dates)):
             prev, cur = covered_dates[i - 1], covered_dates[i]
-            rets = [s[cur] / s[prev] - 1 for s in series
-                    if s.get(prev) and s.get(cur)]
+            rets = [r for r in (s[cur] / s[prev] - 1 for s in series
+                                if s.get(prev) and s.get(cur))
+                    if abs(r) <= CORP_ACTION_JUMP]
             idx.append(idx[-1] * (1 + (sum(rets) / len(rets) if rets else 0.0)))
         return idx
 

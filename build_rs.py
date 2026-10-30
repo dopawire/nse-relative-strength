@@ -914,12 +914,13 @@ def main():
             srs, _ = equal_weight_rs([ser], bench, ref_dates)   # single-stock RS
             st = None
             if srs is not None:
-                ef, price = ema_flags(ser)
                 brk = last_break_date(ser, 252)   # restart metrics after a demerger
+                post = {d: v for d, v in ser.items() if d >= brk} if brk else ser
+                ef, price = ema_flags(post)
                 st = {"name": u["name"], "sym": sym,
                       "rs": srs, "pct": percentrank_inc(srs, srs[-1]),
                       "ema": ef, "ltp": price,
-                      "rse": rs_ema_flag(ser, bench),
+                      "rse": rs_ema_flag(post, bench),
                       "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
                       "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk)}
             stock_cache[sym] = st

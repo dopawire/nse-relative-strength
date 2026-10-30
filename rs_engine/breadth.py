@@ -104,10 +104,37 @@ def compute_macro_breadth(universe, cache, covered_dates):
 # --------------------------------------------------------------------------- #
 
 
+PULLBACK = 0.01    # a prior peak/trough must be separated by >= 1% retracement
+
+
+def _prior_extreme(days, closes, near, peak):
+    """The previous peak (`peak`) / trough (not `peak`) before the current
+    run of `near`-extreme days, provided price retraced >= PULLBACK from it in
+    between — otherwise it is the same swing, not an earlier one.  None if
+    there isn't one."""
+    i = len(days) - 1
+    while i >= 0 and near(closes[days[i]]):
+        i -= 1                               # skip the current run at the extreme
+    prior = days[:i + 1]
+    if not prior:
+        return None
+    ext = (max if peak else min)(prior, key=closes.get)
+    between = [closes[d] for d in days[days.index(ext) + 1:i + 1]]
+    if not between:
+        return None
+    if peak:                                 # needs a dip below it
+        ok = min(between) <= closes[ext] * (1 - PULLBACK)
+    else:                                    # needs a bounce above it
+        ok = max(between) >= closes[ext] * (1 + PULLBACK)
+    return ext if ok else None
+
+
 def detect_breadth_divergence(bench, bdates, bosc):
     """Zanger-style divergence: the index closes near its 26-day high while the
-    breadth oscillator prints a LOWER high than at the previous index-peak
-    (bearish), or the mirror image (bullish)."""
+    breadth oscillator prints a LOWER high than at the previous index peak
+    (bearish), or the mirror image (bullish).  The previous peak/trough is the
+    prior swing — separated from today by a >= 1% retracement — not simply
+    yesterday's close inside the same run."""
     if len(bosc) < 26 or len(bdates) != len(bosc):
         return {"state": "none"}
     idx = {d: i for i, d in enumerate(bdates)}
@@ -120,24 +147,17 @@ def detect_breadth_divergence(bench, bdates, bosc):
     last = days[-1]
     i_last = idx[last]
     if closes[last] >= 0.99 * hi:
-        # at highs — find the previous near-high date inside the window
-        for d in reversed(days[:-1]):
-            if closes[d] >= 0.99 * hi:
-                if bosc[i_last] < bosc[idx[d]]:
-                    return {"state": "bearish",
-                            "note": f"index at 26-day highs but breadth "
-                                    f"({bosc[i_last]:+.1f}) below its level at "
-                                    f"the previous peak ({bosc[idx[d]]:+.1f}, {d})"}
-                break
+        d = _prior_extreme(days, closes, lambda c: c >= 0.99 * hi, peak=True)
+        if d and closes[last] >= closes[d] and bosc[i_last] < bosc[idx[d]]:
+            return {"state": "bearish",
+                    "note": f"index at 26-day highs but breadth "
+                            f"({bosc[i_last]:+.1f}) below its level at "
+                            f"the previous peak ({bosc[idx[d]]:+.1f}, {d})"}
     if closes[last] <= 1.01 * lo:
-        for d in reversed(days[:-1]):
-            if closes[d] <= 1.01 * lo:
-                if bosc[i_last] > bosc[idx[d]]:
-                    return {"state": "bullish",
-                            "note": f"index at 26-day lows but breadth "
-                                    f"({bosc[i_last]:+.1f}) above its level at "
-                                    f"the previous trough ({bosc[idx[d]]:+.1f}, {d})"}
-                break
+        d = _prior_extreme(days, closes, lambda c: c <= 1.01 * lo, peak=False)
+        if d and closes[last] <= closes[d] and bosc[i_last] > bosc[idx[d]]:
+            return {"state": "bullish",
+                    "note": f"index at 26-day lows but breadth "
+                            f"({bosc[i_last]:+.1f}) above its level at "
+                            f"the previous trough ({bosc[idx[d]]:+.1f}, {d})"}
     return {"state": "none"}
-
-

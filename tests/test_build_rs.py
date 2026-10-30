@@ -823,3 +823,17 @@ def test_rs_pct_matches_full_precision_recompute(price_cache, rs_data):
         srs, _ = equal_weight_rs([price_cache[sym]], bench, ref_dates)
         full = round(percentrank_inc(srs, srs[-1]), 4)
         assert full == pytest.approx(stored, abs=1e-9), (key, gname, sym, stored, full)
+
+
+def test_ema_flags_restart_after_corporate_action():
+    """After a demerger the pre-break prices belong to another security: the
+    flags must come from post-break bars only (here: too few → -1)."""
+    from rs_engine.maths import ema_flags
+    dates = [f"2026-{m:02d}-{d:02d}" for m in range(1, 10) for d in range(1, 29)]
+    ser = {d: 1000.0 for d in dates[:-10]}
+    ser.update({d: 300.0 for d in dates[-10:]})          # -70% demerger day
+    brk = build_rs.last_break_date(ser, 252)
+    assert brk == dates[-10]
+    assert ema_flags(ser)[0][0] == 0                     # naive: "below EMA20"
+    post = {d: v for d, v in ser.items() if d >= brk}
+    assert ema_flags(post)[0] == [-1] * len(build_rs.EMA_PERIODS)
