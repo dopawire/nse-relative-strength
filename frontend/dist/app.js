@@ -901,18 +901,40 @@
       $.content.innerHTML = `<div class="brd-empty">No new listings match <code>${utils.esc(q)}</code>.</div>`;
       return;
     }
-    const rows = shown.map(i => `<tr class="ipo-row" data-sym="${utils.esc(i.s)}">
+    // Performance since the listing-day close, ranked vs NIFTY 500 over the
+    // same dates: outperformers best-first, underperformers worst-first.
+    const pct = v => `<span class="${v > 0 ? 'pos' : (v < 0 ? 'neg' : '')}">${v > 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
+    const ranked = (title, list, note) => {
+      if (!list.length) return '';
+      const rows = list.map((i, k) => `<tr class="ipo-row" data-sym="${utils.esc(i.s)}">
+        <td class="tnum ipo-rank">${k + 1}</td>
         <td class="mnm">${utils.esc(i.n)}<span class="msym">${utils.esc(i.s)}</span></td>
         <td class="tnum">${i.first}</td>
         <td class="tnum">${i.days}</td>
+        <td class="tnum">${i.base != null ? utils.fmtPrice(i.base) : '—'}</td>
         <td class="tnum">${utils.fmtPrice(i.ltp)}</td>
+        <td class="tnum">${i.ret != null ? pct(i.ret) : '—'}</td>
+        <td class="tnum">${i.bret != null ? pct(i.bret) : '—'}</td>
+        <td class="tnum ipo-x">${i.xret != null ? pct(i.xret) : '—'}</td>
         <td class="tnum">${i.uc ? 'awaiting NSE classification' : `${i.eta} day${i.eta === 1 ? '' : 's'}`}</td>
       </tr>`).join('');
+      return `<div class="ipo-sec">${title} <span>${list.length} · ${note}</span></div>
+        <table class="ipo-table"><thead><tr>
+          <th>#</th><th>Stock</th><th>Listed</th><th>Days</th><th title="close on the listing day">Listing close</th>
+          <th>LTP</th><th title="LTP vs listing-day close">Since listing</th>
+          <th title="NIFTY 500 over the same dates">NIFTY 500</th>
+          <th title="(1 + stock) / (1 + NIFTY 500) − 1">vs NIFTY 500</th><th>Ranked in</th>
+        </tr></thead><tbody>${rows}</tbody></table>`;
+    };
+    const measured = shown.filter(i => i.xret != null);
+    const out = measured.filter(i => i.xret >= 0).sort((a, b) => b.xret - a.xret);
+    const under = measured.filter(i => i.xret < 0).sort((a, b) => a.xret - b.xret);
+    const fresh = shown.filter(i => i.xret == null);
     $.content.innerHTML = `<div class="mbrd-head">New listings — awaiting first ${win}-day ranking
-      <span> · stocks appear in the RS tables once they have a full window of prices · click a name for its RS chart</span></div>
-      <table class="ipo-table"><thead><tr>
-        <th>Stock</th><th>Listed</th><th>Days</th><th>LTP</th><th>Ranked in</th>
-      </tr></thead><tbody>${rows}</tbody></table>`;
+      <span> · ${out.length} of ${measured.length} beating NIFTY 500 since listing · performance from the listing-day close (issue price not in the data) · click a name for its RS chart</span></div>
+      ${ranked('Outperformers', out, 'ranked best first')}
+      ${ranked('Underperformers', under, 'ranked worst first')}
+      ${ranked('Too new to measure', fresh, 'first session only')}`;
     $.content.querySelectorAll('.ipo-row').forEach(r => {
       r.addEventListener('click', () => openStockModal(r.dataset.sym));
     });
@@ -1629,7 +1651,7 @@
     // Route to the correct tab from URL hash
     const initialTab = getHashTab();
     // Validate against known levels
-    const validTabs = state.levels.map(l => l.key).concat(['breadth']);
+    const validTabs = state.levels.map(l => l.key).concat(['breadth', 'rotation', 'ipo']);
     const tab = validTabs.includes(initialTab) ? initialTab : 'macro';
     if (tab !== initialTab) setHashTab(tab);
     else activateTab(tab);

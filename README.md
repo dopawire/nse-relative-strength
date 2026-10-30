@@ -25,7 +25,11 @@ with:
   the macro groups as a card grid with hover tooltips and RS% badges, and
   **divergence alerts** (index at highs while breadth fades, and the reverse).
 - **Rotation** tab — full-history RS lines per sector vs NIFTY 500.
-- **New Listings** tab — IPOs awaiting their first 26-day ranking.  They also
+- **New Listings** tab — IPOs awaiting their first 26-day ranking, split into
+  **Outperformers** (best first) and **Underperformers** (worst first) by
+  their return since the listing-day close vs NIFTY 500 over the same dates
+  (the issue price isn't in the free data, so the listing-day close is the
+  base).  They also
   appear inside their Macro / Sector / Industry / Basic Industry groups,
   badged **NEW · Nd** and ranked over their days since listing — listed after
   the ranked stocks and kept out of the group index until they have a full

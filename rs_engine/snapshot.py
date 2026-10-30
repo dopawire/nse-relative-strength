@@ -80,12 +80,36 @@ def seed_from_rs_data(path):
     return True
 
 
+def _close_on_or_before(series, day):
+    days = [d for d in series if d <= day]
+    return series[max(days)] if days else None
+
+
+def _listing_perf(ser, bench):
+    """% return from the listing-day close to the latest close, NIFTY 500's
+    return over the same dates, and the relative performance
+    ((1 + stock) / (1 + bench) − 1).  Empty when the benchmark lacks data."""
+    first, last = min(ser), max(ser)
+    b0, b1 = _close_on_or_before(bench, first), _close_on_or_before(bench, last)
+    if not (ser[first] and b0 and b1):
+        return {}
+    ret = ser[last] / ser[first] - 1
+    bret = b1 / b0 - 1
+    return {"base": round(ser[first], 2),
+            "ret": round(ret * 100, 2),
+            "bret": round(bret * 100, 2),
+            "xret": round(((1 + ret) / (1 + bret) - 1) * 100, 2)}
+
+
 def build_ipo_watch(universe, cache, excluded, bench=None):
     """New listings not yet rankable (< WINDOW days of data) — and stocks NSE
     hasn't classified yet (`uc`: no group to rank them in): symbol, name,
-    first trading day, days of history, LTP, days until first ranking — plus
-    the stock's RS line + EMA21 (`bench` given) so the UI can chart them even
-    where the /api/stock endpoint isn't available (static site)."""
+    first trading day, days of history, LTP, days until first ranking, and
+    performance since the listing-day close (`perf`, needs >= 2 sessions):
+    the stock's % return, NIFTY 500's over the same dates, and the stock's
+    out-/under-performance vs it.  Plus the RS line + EMA21 (`bench` given)
+    so the UI can chart them even where the /api/stock endpoint isn't
+    available (static site)."""
     from rs_engine.maths import rs_line
     out = []
     for u in universe:
@@ -102,6 +126,8 @@ def build_ipo_watch(universe, cache, excluded, bench=None):
                  "eta": max(0, WINDOW - len(ser))}
         if unclassified:
             entry["uc"] = True
+        if bench and len(ser) >= 2:
+            entry.update(_listing_perf(ser, bench))
         if bench:
             line = rs_line(ser, bench)
             if line:

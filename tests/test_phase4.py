@@ -208,3 +208,18 @@ def test_seed_archive_from_published_rs_data(tmp_path, monkeypatch):
     assert prev["g"]["macro"]["Tech"] == 0.7 and prev["m"]["AAA"] == 0.4
     assert seed_from_rs_data(str(pub)) is False          # already current
     assert seed_from_rs_data(str(tmp_path / "missing.json")) is False
+
+
+def test_ipo_watch_performance_since_listing():
+    """% from the listing-day close, NIFTY 500 over the same dates, and the
+    relative out-/under-performance; none for a 1-day listing."""
+    cache = {"UP": {"2026-10-26": 100.0, "2026-10-27": 110.0, "2026-10-28": 121.0},
+             "ONE": {"2026-10-28": 50.0}}
+    bench = {"2026-10-23": 990.0, "2026-10-26": 1000.0, "2026-10-27": 1050.0,
+             "2026-10-28": 1100.0}
+    universe = [{"sym": s, "name": s, "macro": "X"} for s in cache]
+    ipo = {i["s"]: i for i in build_ipo_watch(universe, cache, set(cache), bench)}
+    up = ipo["UP"]
+    assert up["base"] == 100.0 and up["ret"] == 21.0 and up["bret"] == 10.0
+    assert up["xret"] == 10.0                     # 1.21 / 1.10 − 1
+    assert "xret" not in ipo["ONE"]

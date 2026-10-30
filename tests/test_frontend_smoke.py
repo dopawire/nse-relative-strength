@@ -180,3 +180,26 @@ def test_static_mode_renders_without_backend(static_server, browser):
     assert len(page.query_selector_all(".macro-card")) >= 10
     assert errors == [], f"page errors after breadth: {errors}"
     ctx.close()
+
+
+@skip_browser
+def test_deep_link_opens_new_listings_ranked(server, browser):
+    """Reloading on #/ipo (or #/rotation) must stay on that tab — it used to
+    bounce to Macro — and New Listings shows the ranked performance tables."""
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server + "/#/ipo", wait_until="networkidle", timeout=30000)
+    page.wait_for_timeout(1000)
+    assert errors == [], f"page errors: {errors}"
+    assert page.query_selector('.tab.active[data-tab="ipo"]') is not None
+    titles = [t.inner_text() for t in page.query_selector_all(".ipo-sec")]
+    if titles:                                 # empty when no new listings today
+        assert any(t.startswith(("Outperformers", "Underperformers")) for t in titles)
+        ranks = [r.inner_text() for r in page.query_selector_all("td.ipo-rank")]
+        assert ranks and ranks[0] == "1"
+    page.goto(server + "/#/rotation", wait_until="networkidle", timeout=30000)
+    page.wait_for_timeout(800)
+    assert page.query_selector('.tab.active[data-tab="rotation"]') is not None
+    ctx.close()
