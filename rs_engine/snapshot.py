@@ -48,6 +48,30 @@ def append_snapshot(levels, window_end):
     return line
 
 
+def seed_from_rs_data(path):
+    """Append the rankings in a committed rs_data.json to the archive when the
+    archive is behind it — a fresh cloud runner (empty cache) or a machine
+    that pulled a newer snapshot then computes daily deltas against the last
+    PUBLISHED rankings instead of none / stale ones.  Returns True if seeded."""
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+        end = data["meta"]["window_dates"][-1]
+    except (OSError, ValueError, KeyError, IndexError):
+        return False
+    prev = load_previous_snapshot()
+    if prev and prev.get("end", "") >= end:
+        return False
+    g = {lv["key"]: {grp["name"]: grp["pct"] for grp in lv["groups"]}
+         for lv in data.get("levels", [])}
+    m = {mem["s"]: mem["p"] for lv in data.get("levels", [])
+         for grp in lv["groups"] for mem in grp["members"]}
+    line = {"end": end, "gen": data["meta"].get("gen", ""), "g": g, "m": m}
+    with open(SNAPSHOTS, "a") as fh:
+        fh.write(json.dumps(line, separators=(",", ":")) + "\n")
+    return True
+
+
 def build_ipo_watch(universe, cache, excluded, bench=None):
     """New listings not yet rankable (< WINDOW days of data) — and stocks NSE
     hasn't classified yet (`uc`: no group to rank them in): symbol, name,

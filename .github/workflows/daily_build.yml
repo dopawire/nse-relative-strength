@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -86,11 +86,11 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         run: python export_static.py
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         if: steps.diff.outputs.changed == 'true'
         with:
           path: site
 
       - name: Deploy to Pages
         if: steps.diff.outputs.changed == 'true'
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

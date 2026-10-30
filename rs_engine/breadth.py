@@ -4,15 +4,18 @@ Zanger-style divergence detection."""
 from collections import defaultdict
 
 
-def compute_breadth(universe, cache, covered_dates):
-    """McClellan-style breadth oscillator from daily advancers vs decliners.
+def _ema(vals, span):
+    k = 2.0 / (span + 1)
+    out, e = [], vals[0]
+    for v in vals:
+        e = v * k + e * (1 - k)
+        out.append(e)
+    return out
 
-      RANA[d]  = (advances - declines) / (advances + declines) * 1000
-      osc[d]   = EMA19(RANA) - EMA39(RANA)
-    Oscillates around zero; extreme highs/lows precede reversals.
-    Returns (dates, osc_values, n_stocks) with the EMA warm-up trimmed.
-    """
-    series = [cache[u["sym"]] for u in universe if cache.get(u["sym"])]
+
+def _oscillator(series, covered_dates):
+    """RANA + EMA19 − EMA39 over `series` ({date: close} each).  Returns
+    (dates, osc) with the EMA warm-up trimmed, or ([], []) if too short."""
     rana, rdates = [], []
     for i in range(1, len(covered_dates)):
         prev, cur = covered_dates[i - 1], covered_dates[i]
@@ -30,21 +33,23 @@ def compute_breadth(universe, cache, covered_dates):
         rana.append((adv - dec) / (adv + dec) * 1000.0 if adv + dec else 0.0)
         rdates.append(cur)
     if len(rana) < 2:
-        return [], [], len(series)
-
-    def ema(vals, span):
-        k = 2.0 / (span + 1)
-        out = []
-        e = vals[0]
-        for v in vals:
-            e = v * k + e * (1 - k)
-            out.append(e)
-        return out
-
-    e19, e39 = ema(rana, 19), ema(rana, 39)
-    osc = [a - b for a, b in zip(e19, e39)]
+        return [], []
+    osc = [a - b for a, b in zip(_ema(rana, 19), _ema(rana, 39))]
     warm = min(39, max(0, len(osc) // 4))   # drop EMA warm-up
-    return rdates[warm:], osc[warm:], len(series)
+    return rdates[warm:], osc[warm:]
+
+
+def compute_breadth(universe, cache, covered_dates):
+    """McClellan-style breadth oscillator from daily advancers vs decliners.
+
+      RANA[d]  = (advances - declines) / (advances + declines) * 1000
+      osc[d]   = EMA19(RANA) - EMA39(RANA)
+    Oscillates around zero; extreme highs/lows precede reversals.
+    Returns (dates, osc_values, n_stocks) with the EMA warm-up trimmed.
+    """
+    series = [cache[u["sym"]] for u in universe if cache.get(u["sym"])]
+    dates, osc = _oscillator(series, covered_dates)
+    return dates, osc, len(series)
 
 
 def compute_macro_breadth(universe, cache, covered_dates):
@@ -52,49 +57,20 @@ def compute_macro_breadth(universe, cache, covered_dates):
     Market Breadth page shows all 12 as a dashboard grid.  Shares the main
     breadth's covered_dates so every chart is aligned.  Returns a list of
     {"name", "dates", "osc", "latest"} sorted by name (macros with ≥ 5
-    stocks; the warm-up trim matches compute_breadth)."""
+    stocks and ≥ 10 points after the warm-up trim)."""
     by_macro = defaultdict(list)
     for u in universe:
         ser = cache.get(u["sym"])
         if ser and u.get("macro"):
             by_macro[u["macro"]].append(ser)
-
-    def ema(vals, span):
-        k = 2.0 / (span + 1)
-        out, e = [], vals[0]
-        for v in vals:
-            e = v * k + e * (1 - k)
-            out.append(e)
-        return out
-
     out = []
     for name, series in sorted(by_macro.items()):
         if len(series) < 5:
             continue
-        rana, rdates = [], []
-        for i in range(1, len(covered_dates)):
-            prev, cur = covered_dates[i - 1], covered_dates[i]
-            adv = dec = 0
-            for s in series:
-                a = s.get(prev)
-                b = s.get(cur)
-                if a is None or b is None:
-                    continue
-                if b > a:
-                    adv += 1
-                elif b < a:
-                    dec += 1
-            # neutral 0.0 keeps the series 1:1 with covered_dates (no skips)
-            rana.append((adv - dec) / (adv + dec) * 1000.0 if adv + dec else 0.0)
-            rdates.append(cur)
-        if len(rana) < 2:
+        dates, osc = _oscillator(series, covered_dates)
+        if len(osc) < 10:
             continue
-        e19, e39 = ema(rana, 19), ema(rana, 39)
-        osc = [a - b for a, b in zip(e19, e39)]
-        warm = min(39, max(0, len(osc) // 4))
-        if len(osc) - warm < 10:
-            continue
-        out.append({"name": name, "dates": rdates[warm:], "osc": osc[warm:],
+        out.append({"name": name, "dates": dates, "osc": osc,
                     "latest": round(osc[-1], 2)})
     return out
 

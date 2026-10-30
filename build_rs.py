@@ -56,7 +56,7 @@ from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
 from rs_engine.rotation import compute_rotation
-from rs_engine.snapshot import (load_previous_snapshot,
+from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
 from rs_engine.render import build_html
@@ -1006,6 +1006,7 @@ def main():
               f"{excluded[:12]}{' …' if len(excluded) > 12 else ''}")
 
     # ---- Phase 4: ranking archive + daily deltas vs the previous snapshot ----
+    seed_from_rs_data(RS_DATA_JSON)        # archive behind the published file?
     prev_snap = load_previous_snapshot()
     window_end = ref_dates[-1] if ref_dates else ""
     append_snapshot(levels, window_end)

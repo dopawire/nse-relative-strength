@@ -173,3 +173,24 @@ def test_rotation_skips_corporate_action_jumps():
     rot = compute_rotation(universe, cache, flat_bench, dates, level="sector")
     rs = next(g["rs"] for g in rot["groups"] if g["name"] == "Flat")
     assert rs[-1] == 1.0
+
+
+def test_seed_archive_from_published_rs_data(tmp_path, monkeypatch):
+    """A fresh runner (empty archive) must compute deltas against the last
+    published rankings — and never seed an older or equal window twice."""
+    import json
+    import rs_engine.snapshot
+    from rs_engine.snapshot import seed_from_rs_data
+    monkeypatch.setattr(rs_engine.snapshot, "SNAPSHOTS", str(tmp_path / "s.jsonl"))
+    pub = tmp_path / "rs_data.json"
+    pub.write_text(json.dumps({"meta": {"window_dates": ["2026-10-28", "2026-10-29"],
+                                        "gen": "g"},
+                               "levels": [{"key": "macro", "groups": [
+                                   {"name": "Tech", "pct": 0.7,
+                                    "members": [{"s": "AAA", "p": 0.4}]}]}]}))
+    assert seed_from_rs_data(str(pub)) is True
+    prev = load_previous_snapshot()
+    assert prev["end"] == "2026-10-29"
+    assert prev["g"]["macro"]["Tech"] == 0.7 and prev["m"]["AAA"] == 0.4
+    assert seed_from_rs_data(str(pub)) is False          # already current
+    assert seed_from_rs_data(str(tmp_path / "missing.json")) is False
