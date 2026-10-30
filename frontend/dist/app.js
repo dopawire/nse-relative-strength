@@ -833,9 +833,25 @@
     });
   }
 
-  // sessions per period; a 340px card holds ~280px of plot, so beyond ~1Y a
-  // single pixel spans several sessions and hover can't reach each day
-  const ROT_RANGES = { '3M': 63, '6M': 126, '1Y': 252, 'All': Infinity };
+  // calendar months per period (All = 0).  A 340px card holds ~280px of
+  // plot, so beyond ~1Y a pixel spans several sessions and hover can't reach
+  // each day — hence the 6M default.
+  const ROT_RANGES = { '3M': 3, '6M': 6, '1Y': 12, 'All': 0 };
+
+  // Index of the base session: the close on (or the last one before) the same
+  // calendar date `months` earlier than the latest date — 30-Oct → 30-Jul for
+  // 3M, as charting tools measure it.
+  function rotStartIndex(dates, months) {
+    if (!months || !dates.length) return 0;
+    const [y, m, d] = dates[dates.length - 1].split('-').map(Number);
+    const back = new Date(Date.UTC(y, m - 1 - months, 1));
+    const lastDay = new Date(Date.UTC(back.getUTCFullYear(), back.getUTCMonth() + 1, 0)).getUTCDate();
+    back.setUTCDate(Math.min(d, lastDay));            // 31-May − 3M → 28/29-Feb
+    const cutoff = back.toISOString().slice(0, 10);
+    let i = 0;
+    while (i + 1 < dates.length && dates[i + 1] <= cutoff) i++;
+    return i;
+  }
 
   function drawRotation(data) {
     const allDates = data.dates || [];
@@ -844,8 +860,8 @@
       $.content.innerHTML = '<div class="brd-empty">No rotation data yet — run a build.</div>';
       return;
     }
-    // period slice, rebased to 1.0 at its first session
-    const start = Math.max(0, allDates.length - ROT_RANGES[state.rotRange]);
+    // period slice, rebased to 1.0 at its base session
+    const start = rotStartIndex(allDates, ROT_RANGES[state.rotRange]);
     const dates = allDates.slice(start);
     const sliced = groups.map(g => {
       const base = g.rs[start] || 1;
@@ -870,7 +886,7 @@
       `<button type="button" class="rot-range${k === state.rotRange ? ' on' : ''}" data-range="${k}">${k}</button>`).join('');
     $.content.innerHTML = `<div class="mbrd-head">Sector rotation — RS vs NIFTY 500
       <span class="rot-ranges">${pills}</span>
-      <span> · chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 at ${dates[0] || 'start'} · ${dates.length} sessions, one point per trading day · hover for values</span></div>
+      <span> · chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 at ${dates[0] || 'start'} · ${dates.length - 1} sessions to ${dates[dates.length - 1] || ''}, one point per trading day · hover for values</span></div>
       <div class="macro-grid">${cards}</div>`;
     groups.forEach((g, i) => {
       bindLineChart('rot-' + i, dates, sliced[i], null, document.getElementById('rot-tip-' + i));

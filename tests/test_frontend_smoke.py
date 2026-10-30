@@ -207,16 +207,27 @@ def test_deep_link_opens_new_listings_ranked(server, browser):
 
 @skip_browser
 def test_rotation_draws_every_session(server, browser):
-    """Rotation charts are daily: one point per session (no downsampling) —
-    6M by default so each day is hoverable, All draws the full history."""
+    """Rotation charts are daily: one point per session (no downsampling).
+    Periods are CALENDAR months back to the close on/before the same date
+    (30-Oct − 6M → 30-Apr) — 6M by default so each day is hoverable — and
+    All draws the full history."""
     import json
-    n_all = len(json.loads((ROOT / "rs_data.json").read_text())["rotation"]["dates"])
+    import datetime as dt
+    dates = json.loads((ROOT / "rs_data.json").read_text())["rotation"]["dates"]
+    n_all = len(dates)
+    last = dt.date.fromisoformat(dates[-1])
+    y, m = divmod(last.year * 12 + last.month - 1 - 6, 12)
+    cutoff = dt.date(y, m + 1, 1)
+    nxt = dt.date(y + (m + 1) // 12, (m + 1) % 12 + 1, 1)
+    cutoff = cutoff.replace(day=min(last.day, (nxt - dt.timedelta(days=1)).day))
+    base = max((i for i, d in enumerate(dates) if d <= cutoff.isoformat()), default=0)
     ctx = browser.new_context()
     page = ctx.new_page()
     page.goto(server + "/#/rotation", wait_until="networkidle", timeout=30000)
     page.wait_for_selector("#rot-0 polyline")
     count = "e => e.getAttribute('points').trim().split(' ').length"
-    assert page.eval_on_selector("#rot-0 polyline", count) == min(126, n_all)
+    assert page.eval_on_selector("#rot-0 polyline", count) == n_all - base
+    assert f"rebased to 1.0 at {dates[base]}" in page.inner_text(".mbrd-head")
     page.click(".rot-range[data-range='All']")
     page.wait_for_timeout(300)
     assert page.eval_on_selector("#rot-0 polyline", count) == n_all
