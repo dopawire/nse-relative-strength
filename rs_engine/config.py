@@ -82,3 +82,76 @@ def latest_session(now=None):
     while d.weekday() >= 5 or is_holiday(d.isoformat()):
         d -= dt.timedelta(days=1)
     return d.isoformat()
+
+
+# NSE's current (2023+) classification has exactly these 12 macro groups; a
+# value outside them is the retired scheme (e.g. MANUFACTURING / CONSUMER)
+# that NSE still returns for a few stocks.
+CURRENT_MACROS = frozenset({
+    "Commodities", "Consumer Discretionary", "Diversified", "Energy",
+    "Fast Moving Consumer Goods", "Financial Services", "Healthcare",
+    "Industrials", "Information Technology", "Services", "Telecommunication",
+    "Utilities"})
+
+_LOWER_WORDS = {"and", "of", "in", "for", "the", "or", "with"}
+
+
+def standard_name(value):
+    """One spelling per classification name: Title Case words ('Port & Port
+    services' → 'Port & Port Services'), joining words ('and', 'of', …)
+    lowercase after the first, tokens that already carry capitals kept (IT, FMCG, BPO), whitespace
+    collapsed, and mis-decoded dashes (U+FFFD) repaired as ' - '."""
+    import re
+    v = re.sub(r"\s*�+\s*", " - ", value or "")
+    v = " ".join(v.split())
+    if v.isupper() and len(v) > 4:                # ALL-CAPS outlier → title
+        v = v.title()
+    words = v.split(" ")
+    for i, w in enumerate(words):
+        if i and w.lower() in _LOWER_WORDS:
+            words[i] = w.lower()
+            continue
+        if not w or not w[0].isalpha() or any(c.isupper() for c in w):
+            continue
+        words[i] = w[0].upper() + w[1:]
+    return " ".join(words)
+
+
+_COMMON_SHORT = {"of", "and", "the", "ltd", "co", "pvt", "one", "new", "for",
+                 "in", "big", "sun", "tea", "oil", "gas", "art", "web", "hi", "go",
+                 "om", "sky", "we", "win", "gem", "tek"}
+
+
+def standard_company(name):
+    """Company names in normal case: NSE lists ~2% of them in ALL CAPS
+    ('ANDHRA PAPER LIMITED' → 'Andhra Paper Limited').  Acronyms survive —
+    a token of <= 3 letters (GMR, BIL, EPC) or without vowels (DMCC) stays
+    upper-case unless it is a common word (of, and, Ltd…).  Names already in
+    mixed case are kept exactly as NSE writes them."""
+    name = " ".join((name or "").split())
+    if not name.isupper():
+        return name
+
+    def fix(tok):
+        letters = "".join(c for c in tok if c.isalpha())
+        if not letters:
+            return tok
+        low = letters.lower()
+        if low in _COMMON_SHORT:
+            word = low if low in ("of", "and", "the", "for", "in") else low.capitalize()
+            return tok.replace(letters, word) if letters in tok else tok
+        if len(letters) <= 3 or not set(low) & set("aeiouy"):
+            return tok                                    # acronym
+        out, up = [], True                                 # Title-case letters
+        for c in tok:
+            out.append(c.upper() if up else c.lower()) if c.isalpha() else out.append(c)
+            up = not c.isalpha() and c != "'"
+        return "".join(out)
+
+    words = []
+    for i, w in enumerate(name.split(" ")):
+        w = "-".join(fix(p) for p in w.split("-"))
+        if i == 0 and w[:1].islower():
+            w = w[0].upper() + w[1:]
+        words.append(w)
+    return " ".join(words)

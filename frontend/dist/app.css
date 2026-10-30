@@ -451,3 +451,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   .app-shell{max-width:100%;padding:0}
   body{background:#fff;color:#000;font-size:11px}
 }
+.new-badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;
+  font-size:10px;font-weight:600;letter-spacing:.02em;
+  background:var(--accent-bg);color:var(--accent);border:1px dashed var(--accent)}
+.rs-pct.since-listing{outline:1px dashed var(--accent);outline-offset:1px}
+.cnt-new{margin-left:6px;font-size:11px;color:var(--accent)}

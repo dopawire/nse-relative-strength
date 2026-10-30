@@ -11,27 +11,29 @@ SNAPSHOTS = os.path.join(CACHE_DIR, "snapshots.jsonl")   # daily ranking archive
 
 
 
-def load_previous_snapshot():
-    """Last line of the ranking archive, or None."""
+def _read_lines():
     if not os.path.exists(SNAPSHOTS):
-        return None
+        return []
+    with open(SNAPSHOTS) as fh:
+        return [ln for ln in fh if ln.strip()]
+
+
+def load_previous_snapshot(before=None):
+    """Last archived snapshot — or, with `before`, the last one whose window
+    ends strictly before that date.  None if there is none."""
     try:
-        with open(SNAPSHOTS) as fh:
-            last = ""
-            for line in fh:
-                if line.strip():
-                    last = line
-            return json.loads(last) if last else None
+        for line in reversed(_read_lines()):
+            snap = json.loads(line)
+            if before is None or snap.get("end", "") < before:
+                return snap
     except Exception:
-        return None
+        pass
+    return None
 
 
 def append_snapshot(levels, window_end):
-    """Append today's rankings to the archive (one JSONL line per window end;
-    idempotent across rebuilds of the same day)."""
-    prev = load_previous_snapshot()
-    if prev and prev.get("end") == window_end:
-        return prev
+    """Archive today's rankings — one JSONL line per window end.  A rebuild of
+    the same window REPLACES its line, so the archive keeps the final data."""
     g = {}
     m = {}
     for key, _label, items in levels:
@@ -43,8 +45,14 @@ def append_snapshot(levels, window_end):
     line = {"end": window_end,
             "gen": dt.datetime.now(IST).strftime("%Y-%m-%d %H:%M"),
             "g": g, "m": m}
-    with open(SNAPSHOTS, "a") as fh:
-        fh.write(json.dumps(line, separators=(",", ":")) + "\n")
+    lines = _read_lines()
+    if lines and json.loads(lines[-1]).get("end") == window_end:
+        lines = lines[:-1]
+    lines.append(json.dumps(line, separators=(",", ":")) + "\n")
+    tmp = SNAPSHOTS + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(lines)
+    os.replace(tmp, SNAPSHOTS)
     return line
 
 

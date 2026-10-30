@@ -222,16 +222,22 @@ _pipeline = {
 _pipeline_lock = threading.Lock()
 
 
-def _run_script(args: list[str], task_name: str):
-    """Run a script in the background, capture output, auto-reload data."""
-    py = sys.executable
-    cmd = [py] + args
+def _run_script(args: list[str] | list[list[str]], task_name: str):
+    """Run a script — or several in sequence, stopping at the first failure —
+    in the background, capture output, auto-reload data."""
+    steps = args if args and isinstance(args[0], list) else [args]
     try:
-        result = subprocess.run(
-            cmd, cwd=ROOT, capture_output=True, text=True, timeout=900,
-        )
-        out = (result.stdout + "\n" + result.stderr)[-1500:]
-        ok = result.returncode == 0
+        out, ok = "", True
+        for step in steps:
+            result = subprocess.run(
+                [sys.executable] + step, cwd=ROOT, capture_output=True,
+                text=True, timeout=900,
+            )
+            out += result.stdout + "\n" + result.stderr
+            if result.returncode != 0:
+                ok = False
+                break
+        out = out[-1500:]
     except subprocess.TimeoutExpired:
         out = "Timed out after 15 minutes"
         ok = False
@@ -287,9 +293,9 @@ def refresh_stocks(dry_run: bool = Query(False, description="Only list new symbo
         _pipeline["started_at"] = dt.datetime.now().isoformat(timespec="seconds")
         _pipeline["finished_at"] = None
 
-    args = ["refresh_classification.py"]
-    if dry_run:
-        args.append("--dry-run")
+    # a real refresh is followed by a quick build, so new listings show up
+    args = (["refresh_classification.py", "--dry-run"] if dry_run else
+            [["refresh_classification.py"], ["build_rs.py", "--fast"]])
 
     threading.Thread(target=_run_script, args=(args, "stocks"), daemon=True).start()
     return {"status": "started", "dry_run": dry_run, "started_at": _pipeline["started_at"]}

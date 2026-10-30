@@ -123,10 +123,24 @@ def test_snapshot_roundtrip_and_idempotency(tmp_path, monkeypatch):
     assert snap["end"] == "2026-10-01"
     prev = load_previous_snapshot()
     assert prev["g"]["macro"]["Tech"] == 0.8 and prev["m"]["AAA"] == 0.9
-    # same window end → no new line
+    # same window end → its line is REPLACED (archive keeps the final data)
+    levels[0][2][0]["pct"] = 0.6
     append_snapshot(levels, "2026-10-01")
     with open(tmp_path / "snaps.jsonl") as f:
         assert len([ln for ln in f if ln.strip()]) == 1
+    assert load_previous_snapshot()["g"]["macro"]["Tech"] == 0.6
+
+
+def test_same_day_rebuild_still_compares_with_previous_window(tmp_path, monkeypatch):
+    """Rebuilding the same window must compare with YESTERDAY's rankings —
+    comparing with today's own line wiped every daily delta."""
+    import rs_engine.snapshot
+    monkeypatch.setattr(rs_engine.snapshot, "SNAPSHOTS", str(tmp_path / "s.jsonl"))
+    lv = [("macro", "Macro", [{"name": "Tech", "pct": 0.5, "members": []}])]
+    append_snapshot(lv, "2026-10-28")
+    append_snapshot(lv, "2026-10-29")
+    assert load_previous_snapshot(before="2026-10-29")["end"] == "2026-10-28"
+    assert load_previous_snapshot(before="2026-10-28") is None
 
 
 def test_daily_report_written(tmp_path):

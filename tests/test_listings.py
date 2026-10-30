@@ -105,3 +105,49 @@ def test_sync_holidays_adds_weekdays_only(tmp_path, monkeypatch):
     monkeypatch.setattr(rc.requests, "get", lambda *a, **k: Resp())
     rc.sync_holidays()
     assert [r["date"] for r in _read(path)] == ["2026-12-25", "2027-01-26"]
+
+
+def test_standard_name_spelling():
+    from rs_engine.config import standard_name as s
+    assert s("Port & Port services") == "Port & Port Services"
+    assert s("Gems Jewellery And Watches") == "Gems Jewellery and Watches"
+    assert s("Agricultural Food & other Products") == "Agricultural Food & Other Products"
+    assert s("HEALTHCARE") == "Healthcare"
+    assert s("IT - Services") == "IT - Services"                 # acronyms kept
+    assert s("Business Process Outsourcing (BPO)/ Knowledge Process Outsourcing (KPO)") \
+        == "Business Process Outsourcing (BPO)/ Knowledge Process Outsourcing (KPO)"
+    assert s("Dealers���Commercial Vehicles") == "Dealers - Commercial Vehicles"
+    assert s("") == ""
+
+
+def test_normalise_applies_overrides_and_spelling(tmp_path, monkeypatch):
+    ov = tmp_path / "ov.csv"
+    ov.write_text("symbol,macro,sector,industry,basicIndustry,note\n"
+                  "OLDSCHEME,Industrials,Capital Goods,Industrial Products,Castings,x\n")
+    monkeypatch.setattr(rc, "OVERRIDES", str(ov))
+    legacy = _row("OLDSCHEME", "I1", "MANUFACTURING")
+    spelling = _row("PORT", "I2", "Services")
+    spelling["basicIndustry"] = "Port & Port services"
+    fine = _row("FINE", "I3", "Energy")
+    master = [legacy, spelling, fine]
+    assert rc.normalise(master) == 2
+    assert legacy["macro"] == "Industrials" and legacy["basicIndustry"] == "Castings"
+    assert spelling["basicIndustry"] == "Port & Port Services"
+    assert rc.normalise(master) == 0                               # idempotent
+
+
+def test_retired_scheme_counts_as_unclassified():
+    assert not rc.is_classified(_row("A", "I", "MANUFACTURING"))
+    assert not rc.is_classified(_row("B", "I", ""))
+    assert rc.is_classified(_row("C", "I", "Healthcare"))
+
+
+def test_standard_company_keeps_acronyms():
+    from rs_engine.config import standard_company as f
+    assert f("ANDHRA PAPER LIMITED") == "Andhra Paper Limited"
+    assert f("GMR AIRPORTS LIMITED") == "GMR Airports Limited"          # acronym
+    assert f("DMCC SPECIALITY CHEMICALS LIMITED") == "DMCC Speciality Chemicals Limited"
+    assert f("GLOBE ENTERPRISES (INDIA) LIMITED") == "Globe Enterprises (India) Limited"
+    assert f("DHARAN INFRA-EPC LIMITED") == "Dharan Infra-EPC Limited"
+    assert f("SKY GOLD AND DIAMONDS LIMITED") == "Sky Gold and Diamonds Limited"
+    assert f("HDFC Bank Limited") == "HDFC Bank Limited"                # mixed: untouched

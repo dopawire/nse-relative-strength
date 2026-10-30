@@ -9,12 +9,14 @@ PASS/FAIL report.  Exits non-zero on any FAIL so cron/CI can alert.
     python3 audit_data.py --json   # machine-readable
 """
 import os
+import csv
 import sys
 import json
 import datetime as dt
 
 import build_rs as rs
-from rs_engine.config import latest_session, load_holidays
+from rs_engine.config import (latest_session, load_holidays, CURRENT_MACROS,
+                              standard_name, standard_company)
 
 ROOT = rs.HERE
 
@@ -116,10 +118,13 @@ def check_freshness():
 
 
 def check_reconciliation(rs_data):
-    """meta.n_stocks ≥ n_window == member union; excluded must reconcile."""
+    """meta.n_stocks ≥ n_window == union of RANKED members (new listings are
+    shown in the groups but still counted on the IPO watch); excluded must
+    reconcile."""
     meta = rs_data.get("meta", {})
     union = {m["s"] for lv in rs_data.get("levels", [])
-             for g in lv.get("groups", []) for m in g.get("members", [])}
+             for g in lv.get("groups", []) for m in g.get("members", [])
+             if not m.get("nw")}
     issues = []
     if len(union) != meta.get("n_window"):
         issues.append(f"n_window={meta.get('n_window')} but member union is "
@@ -131,6 +136,24 @@ def check_reconciliation(rs_data):
     if len(excluded) != n_stocks - n_window:
         issues.append(f"excluded={len(excluded)} does not reconcile with "
                       f"n_stocks-n_window={n_stocks - n_window}")
+    return issues
+
+
+def check_classification():
+    """Master names must be in NSE's CURRENT scheme and standard spelling — a
+    retired-scheme value (MANUFACTURING, CONSUMER…) becomes a phantom 1-stock
+    group; mixed casing splits one group in two."""
+    issues = []
+    with open(rs.MASTER_CSV, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r["macro"] and r["macro"] not in CURRENT_MACROS:
+                issues.append(f"{r['symbol']}: retired-scheme macro {r['macro']!r} "
+                              f"— add it to nse_classification_overrides.csv")
+            for k in ("macro", "sector", "industry", "basicIndustry"):
+                if r[k] != standard_name(r[k]):
+                    issues.append(f"{r['symbol']}: non-standard {k} {r[k]!r}")
+            if r["company"] != standard_company(r["company"]):
+                issues.append(f"{r['symbol']}: non-standard company {r['company']!r}")
     return issues
 
 
@@ -192,6 +215,7 @@ def main():
 
     report["freshness"] = check_freshness()
     report["holiday_calendar"] = check_holiday_calendar()
+    report["classification"] = check_classification()
     report["latest_session"] = check_data_covers_latest_session()
 
     try:

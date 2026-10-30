@@ -638,7 +638,29 @@ def test_group_index_uses_only_listed_members(rs_data):
     out of the table (gaps in the window) must not move the group index."""
     for lv in rs_data["levels"]:
         for g in lv["groups"]:
-            assert g["n"] == len(g["members"]), (lv["key"], g["name"])
+            ranked = [m for m in g["members"] if not m.get("nw")]
+            assert g["n"] == len(ranked), (lv["key"], g["name"])
+            # new listings are listed after the ranked stocks
+            flags = [bool(m.get("nw")) for m in g["members"]]
+            assert flags == sorted(flags), (lv["key"], g["name"])
+
+
+def test_new_listings_appear_in_every_level(rs_data):
+    """A stock listed inside the window (>= 2 sessions, no gaps) is shown in
+    its macro / sector / industry / basic group, flagged with its day count,
+    and stays on the New Listings watch until it has a full window."""
+    ipo = {i["s"]: i for i in rs_data["meta"]["ipo"]}
+    by_level = {lv["key"]: {m["s"]: m for g in lv["groups"] for m in g["members"]
+                            if m.get("nw")} for lv in rs_data["levels"]}
+    shown = set(by_level["macro"])
+    if not shown:
+        pytest.skip("no multi-day new listings in the current window")
+    for key, members in by_level.items():
+        assert set(members) == shown, key
+    for s in shown:
+        m = by_level["macro"][s]
+        assert s in ipo and m["nw"] >= 2 and len(m["r"]) == m["nw"]
+        assert 0.0 <= m["p"] <= 1.0
 
 
 def test_rs_data_structure(rs_data):
@@ -675,9 +697,11 @@ def test_rs_window_alignment_and_scores(rs_data):
         for g in lvl["groups"]:
             assert len(g["r"]) == WINDOW, (lvl["key"], g["name"])
             assert 0.0 <= g["pct"] <= 1.0 + 1e-9
-            assert g["n"] >= len(g["members"]) > 0, (lvl["key"], g["name"])
+            ranked = [m for m in g["members"] if not m.get("nw")]
+            assert g["n"] >= len(ranked) > 0, (lvl["key"], g["name"])
             for m in g["members"]:
-                assert len(m["r"]) == WINDOW, (g["name"], m["s"])
+                # new listings carry their days since listing, not a full window
+                assert len(m["r"]) == (m.get("nw") or WINDOW), (g["name"], m["s"])
                 assert 0.0 <= m["p"] <= 1.0 + 1e-9
 
 
@@ -739,7 +763,8 @@ def test_window_coverage_consistent(rs_data, price_cache):
     excluded stock genuinely lacks ≥1 of the 26 window dates — i.e. no stock
     with complete window data is silently dropped."""
     meta = rs_data["meta"]
-    union = {m["s"] for lvl in rs_data["levels"] for g in lvl["groups"] for m in g["members"]}
+    union = {m["s"] for lvl in rs_data["levels"] for g in lvl["groups"]
+             for m in g["members"] if not m.get("nw")}       # new listings: IPO watch
     assert len(union) == meta["n_window"], (len(union), meta["n_window"])
     assert 0 < meta["n_window"] <= meta["n_stocks"]
     assert len(meta["excluded"]) == meta["n_stocks"] - meta["n_window"]

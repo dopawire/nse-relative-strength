@@ -68,3 +68,16 @@ def test_coverage_ignores_symbols_outside_universe():
     cache = {"__BENCH__": {}, "LIVE": {"d": 1.0}, "DELISTED": {"d": 1.0}}
     assert audit_data._have(cache) == ["LIVE", "DELISTED"]
     assert audit_data._have(cache, ["LIVE", "NOPRICES"]) == ["LIVE"]
+
+
+def test_classification_check_flags_retired_scheme_and_spelling(tmp_path, monkeypatch):
+    p = tmp_path / "master.csv"
+    p.write_text("symbol,company,series,isin,macro,sector,industry,basicIndustry\n"
+                 "OK,a,EQ,I1,Energy,Oil Gas & Consumable Fuels,Gas,LPG/CNG/PNG/LNG Supplier\n"
+                 "OLD,b,EQ,I2,MANUFACTURING,AUTOMOBILE,AUTO ANCILLARIES,AUTO ANCILLARIES\n"
+                 "CASE,c,EQ,I3,Services,Services,Transport Infrastructure,Port & Port services\n")
+    monkeypatch.setattr(build_rs, "MASTER_CSV", str(p))
+    issues = audit_data.check_classification()
+    assert any("OLD" in i and "retired" in i for i in issues)
+    assert any("CASE" in i and "Port & Port services" in i for i in issues)
+    assert not any(i.startswith("OK:") for i in issues)

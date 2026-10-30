@@ -42,14 +42,15 @@ import argparse
 import datetime as dt
 import threading
 import concurrent.futures as cf
-from collections import defaultdict, Counter
+from collections import defaultdict
 
 import requests
 
 # ---- rs_engine: computation core (re-exported here for compatibility) ----
 from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               APPEND_RANGE, MIN_BARS, EMA_PERIODS, BENCHMARK_NAME, BENCH_YSYM,
-                              YH_WORKERS, IST, is_holiday)
+                              YH_WORKERS, IST, is_holiday, standard_name,
+                              standard_company)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs)
@@ -112,7 +113,7 @@ def read_universe():
             if not sym:
                 continue
             rows.append({
-                "name":     (r.get("company") or sym).strip(),
+                "name":     standard_company(r.get("company") or sym),
                 "sym":      sym,
                 "macro":    (r.get("macro") or "").strip(),
                 "sector":   (r.get("sector") or "").strip(),
@@ -120,19 +121,12 @@ def read_universe():
                 "basic":    (r.get("basicIndustry") or "").strip(),
             })
 
-    # Canonicalise casing per level: NSE occasionally returns an all-caps
-    # outlier (e.g. "HEALTHCARE" for one stock vs "Healthcare" for 164), which
-    # would otherwise split into a phantom second group. Collapse each
-    # case-insensitive value to its most-common existing casing.
-    for key in ("macro", "sector", "industry", "basic"):
-        variants = defaultdict(Counter)
-        for r in rows:
-            if r[key]:
-                variants[r[key].lower()][r[key]] += 1
-        canon = {lk: c.most_common(1)[0][0] for lk, c in variants.items()}
-        for r in rows:
-            if r[key]:
-                r[key] = canon[r[key].lower()]
+    # One spelling per name (refresh_classification.py already writes them
+    # this way; this guards hand edits): an all-caps outlier such as
+    # "HEALTHCARE" would otherwise split into a phantom second group.
+    for r in rows:
+        for key in ("macro", "sector", "industry", "basic"):
+            r[key] = standard_name(r[key])
     return rows
 
 
@@ -770,6 +764,7 @@ def save_rs_json(levels, breadth, meta, path, rotation=None):
                     "l": round(m["ltp"], 2) if m.get("ltp") is not None else None,
                     "h": round(m["hi52"], 1) if m.get("hi52") is not None else None,
                     "a": round(m["adr"], 2) if m.get("adr") is not None else None,
+                    "nw": m.get("new"),       # new listing: days since listing
                 })
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
@@ -907,9 +902,19 @@ def main():
     stock_cache = {}       # sym -> metrics (shared by all four levels)
 
     def stock_metrics(u, ser):
+        """Full-window metrics, or — for a stock listed INSIDE the window with
+        every session since — the same metrics over its days since listing,
+        tagged "new" (= that day count).  None otherwise (gaps, < 2 days)."""
         sym = u["sym"]
         if sym not in stock_cache:
-            srs, _ = equal_weight_rs([ser], bench, ref_dates)   # single-stock RS
+            dates, new = ref_dates, None
+            first = min(ser)
+            if first > ref_dates[0]:                     # listed inside the window
+                dates = [d for d in ref_dates if d >= first]
+                new = len(dates)
+                if new < 2 or any(d not in ser for d in dates):
+                    dates = None
+            srs = equal_weight_rs([ser], bench, dates)[0] if dates else None
             st = None
             if srs is not None:
                 brk = last_break_date(ser, 252)   # restart metrics after a demerger
@@ -920,7 +925,8 @@ def main():
                       "ema": ef, "ltp": price,
                       "rse": rs_ema_flag(post, bench),
                       "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
-                      "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk)}
+                      "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk),
+                      "new": new}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row
@@ -945,20 +951,22 @@ def main():
                                    len(ref_dates)):
                     skipped_breaks.append(u["sym"])
                     continue
-                # only stocks with a full window enter the group index — one
-                # with gaps would make the equal-weight average jump as its
-                # missing days change the constituent set
                 st = stock_metrics(u, ser)
                 if st is None:
                     continue
-                series.append(ser)
                 stocks.append(st)
+                # only stocks with a full window enter the group index — one
+                # with gaps (or a fresh listing) would make the equal-weight
+                # average jump as the constituent set changes; new listings
+                # are listed in the group, ranked since their listing day
+                if not st["new"]:
+                    series.append(ser)
             if not series:
                 continue
             rs, n = equal_weight_rs(series, bench, ref_dates)
             if rs is None:
                 continue
-            stocks.sort(key=lambda x: x["pct"], reverse=True)
+            stocks.sort(key=lambda x: (bool(x["new"]), -x["pct"]))   # new listings last
             out.append({"name": gname, "n": n, "rs": rs,
                         "pct": percentrank_inc(rs, rs[-1]), "members": stocks})
         out.sort(key=lambda x: x["pct"], reverse=True)
@@ -994,7 +1002,8 @@ def main():
     for _key, _label, items in levels:
         for it in items:
             for m in it["members"]:
-                level_members.add(m["sym"])
+                if not m["new"]:              # new listings stay on the IPO watch
+                    level_members.add(m["sym"])
     n_window = len(level_members)
     excluded = sorted(u["sym"] for u in universe
                       if cache.get(u["sym"]) and u["sym"] not in level_members)
@@ -1005,11 +1014,12 @@ def main():
 
     # ---- Phase 4: ranking archive + daily deltas vs the previous snapshot ----
     seed_from_rs_data(RS_DATA_JSON)        # archive behind the published file?
-    prev_snap = load_previous_snapshot()
     window_end = ref_dates[-1] if ref_dates else ""
+    # deltas vs the last EARLIER window — a same-day rebuild must compare with
+    # yesterday again, not with today's own archived line
+    prev_snap = load_previous_snapshot(before=window_end)
     append_snapshot(levels, window_end)
-    # deltas only vs a genuinely EARLIER snapshot (same-day rebuilds show none)
-    if prev_snap and prev_snap.get("end") != window_end:
+    if prev_snap:
         pg = prev_snap.get("g", {})
         pm = prev_snap.get("m", {})
         for key, _l, items in levels:

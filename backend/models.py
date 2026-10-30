@@ -31,6 +31,7 @@ class MemberOut(BaseModel):
     l: float | None = None  # noqa: E741 — last traded price (data key 'l')
     h: float | None      # % off 52-week high
     a: float | None      # ADR%
+    nw: int | None = None   # new listing: days since listing (RS% over those days)
 
 
 class GroupOut(BaseModel):

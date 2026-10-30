@@ -37,11 +37,15 @@ import datetime as dt
 
 import requests
 
+from rs_engine.config import CURRENT_MACROS, standard_name, standard_company
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER = os.path.join(HERE, "nse_stock_master.csv")
 CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")   # old,new,isin,date
 DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
 HOLIDAYS = os.path.join(HERE, "nse_holidays.csv")
+OVERRIDES = os.path.join(HERE, "nse_classification_overrides.csv")  # hand-checked fixes
+LEVEL_FIELDS = ["macro", "sector", "industry", "basicIndustry"]
 HOLIDAY_API = "https://www.nseindia.com/api/holiday-master?type=trading"
 EQUITY_L = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 FIELDS = ["symbol", "company", "series", "isin",
@@ -120,6 +124,37 @@ def parse_equity_text(text):
     return rows
 
 
+def load_overrides():
+    """{symbol: {macro, sector, industry, basicIndustry}} — manual fixes for
+    stocks NSE still classifies under its retired scheme."""
+    if not os.path.exists(OVERRIDES):
+        return {}
+    with open(OVERRIDES, newline="", encoding="utf-8") as f:
+        return {r["symbol"].strip().upper(): {k: r[k].strip() for k in LEVEL_FIELDS}
+                for r in csv.DictReader(f) if r.get("symbol")}
+
+
+def is_classified(row):
+    """Has a classification in NSE's CURRENT scheme (retired-scheme values
+    such as MANUFACTURING / CONSUMER count as unclassified → re-fetched)."""
+    return standard_name(row.get("macro", "")) in CURRENT_MACROS
+
+
+def normalise(master):
+    """Apply overrides and the standard spelling (classification + company
+    name) to every row in place.  Returns how many rows changed."""
+    overrides = load_overrides()
+    changed = 0
+    for r in master:
+        new = dict(overrides.get(r["symbol"].upper()) or {
+            k: standard_name(r.get(k, "")) for k in LEVEL_FIELDS})
+        new["company"] = standard_company(r.get("company", ""))
+        if any(r.get(k, "") != v for k, v in new.items()):
+            r.update(new)
+            changed += 1
+    return changed
+
+
 def sync_holidays():
     """Merge NSE's published cash-market trading holidays into
     nse_holidays.csv — adds, never removes.  Weekdays only: weekend entries
@@ -182,7 +217,7 @@ def reconcile(master, live, dry_run=False):
             renames.append({"old": sym, "new": new, "isin": r["isin"], "date": today})
             dup = by_sym.get(new)
             if dup is not None:
-                if not (dup.get("macro") or dup.get("sector") or dup.get("basicIndustry")):
+                if not is_classified(dup):
                     for k in ("macro", "sector", "industry", "basicIndustry"):
                         dup[k] = r.get(k, "")
                 continue                       # the new symbol's row stays
@@ -237,6 +272,7 @@ def save_stubs_and_exit(master, live, new_syms, why):
 
 
 def save_master(rows):
+    normalise(rows)                  # every write uses the standard spelling
     tmp = MASTER + ".tmp"
     with open(tmp, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
@@ -261,6 +297,8 @@ def main():
     if live:
         master = reconcile(master, live, dry_run=args.dry_run)
     have = {r["symbol"].upper() for r in master}
+    if not args.dry_run and normalise(master):
+        save_master(master)
 
     if args.dry_run:
         if live is None:
@@ -268,8 +306,7 @@ def main():
             print("--dry-run cannot list new symbols; use a VPN / Indian IP.")
             sys.exit(1)
         new_syms = [s for s in live if s not in have]
-        unfilled = [r["symbol"].upper() for r in master
-                    if not (r.get("macro") or r.get("sector") or r.get("basicIndustry"))]
+        unfilled = [r["symbol"].upper() for r in master if not is_classified(r)]
         todo = list(dict.fromkeys(new_syms + unfilled))
         print(f"Master: {len(master)} stocks. NSE list: {len(live)}. "
               f"New: {len(new_syms)}. Unfilled existing: {len(unfilled)}. "
@@ -286,6 +323,10 @@ def main():
         if live is None:
             sys.exit("NSE equity list blocked from this IP — cannot add stubs.")
         save_stubs_and_exit(master, live, new_from_http, "--stubs-only")
+
+    if live is not None and not new_from_http and all(is_classified(r) for r in master):
+        print(f"Master: {len(master)} stocks — up to date, nothing to fetch.")
+        return
 
     try:
         from playwright.sync_api import sync_playwright
@@ -338,8 +379,7 @@ def main():
 
         new_syms = [s for s in live if s not in have]
         # also flag master rows still missing a classification (e.g. earlier misses)
-        unfilled = [r["symbol"].upper() for r in master
-                    if not (r.get("macro") or r.get("sector") or r.get("basicIndustry"))]
+        unfilled = [r["symbol"].upper() for r in master if not is_classified(r)]
         todo = list(dict.fromkeys(new_syms + unfilled))
 
         print(f"Master: {len(master)} stocks. NSE list: {len(live)}. "
@@ -365,13 +405,18 @@ def main():
             except Exception as e:
                 print(f"  [{i}/{len(todo)}] {sym} eval error: {type(e).__name__}")
             row = by_sym.get(sym)
-            if si and row is not None:
-                row["macro"] = si.get("macro", "") or ""
-                row["sector"] = si.get("sector", "") or ""
-                row["industry"] = si.get("industryInfo", "") or ""   # Industry lives here
-                row["basicIndustry"] = si.get("basicIndustry", "") or ""
+            got = {"macro": si.get("macro"), "sector": si.get("sector"),
+                   "industry": si.get("industryInfo"),          # Industry lives here
+                   "basicIndustry": si.get("basicIndustry")} if si else {}
+            got = {k: standard_name(v or "") for k, v in got.items()}
+            if got and row is not None and got["macro"] in CURRENT_MACROS:
+                row.update(got)
                 filled += 1
                 tag = "ok"
+            elif got:
+                misses.append(sym)
+                tag = (f"MISS — retired NSE scheme ({got['macro']} > "
+                       f"{got['basicIndustry']}); add it to {os.path.basename(OVERRIDES)}")
             else:
                 misses.append(sym)
                 tag = "MISS"

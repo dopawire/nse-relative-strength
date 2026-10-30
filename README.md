@@ -25,7 +25,11 @@ with:
   the macro groups as a card grid with hover tooltips and RS% badges, and
   **divergence alerts** (index at highs while breadth fades, and the reverse).
 - **Rotation** tab — full-history RS lines per sector vs NIFTY 500.
-- **New Listings** tab — IPOs awaiting their first 26-day ranking.
+- **New Listings** tab — IPOs awaiting their first 26-day ranking.  They also
+  appear inside their Macro / Sector / Industry / Basic Industry groups,
+  badged **NEW · Nd** and ranked over their days since listing — listed after
+  the ranked stocks and kept out of the group index until they have a full
+  window (so a 2-day-old stock can't swing its group).
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method
@@ -169,7 +173,12 @@ driver) cannot run.  The shell scripts pick the interpreter via
 - `nse_stock_master.csv` — the universe + 4-level classification;
   `nse_symbol_changes.csv` (renames — the build stitches the old ticker's
   history onto the new one) and `nse_delisted.csv` (archived rows) are
-  maintained by `refresh_classification.py`.
+  maintained by `refresh_classification.py`.  Names are stored in one
+  standard spelling (Title Case classification names, ALL-CAPS company names
+  normalised with acronyms kept).  `nse_classification_overrides.csv` holds
+  hand-checked classifications for the few stocks NSE still reports under its
+  retired scheme (MANUFACTURING, CONSUMER…) — the audit fails if such a value
+  or a non-standard spelling reaches the master.
 - `rs_engine/` — computation core (config, RS maths, breadth, rotation,
   snapshots, digest); `build_rs.py` holds the data layer
   (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.

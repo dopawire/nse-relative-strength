@@ -255,7 +255,7 @@
       } catch (e) {
         // Cache the error so we don't keep retrying on tab switch
         state.levelData[tab] = { _error: e.message };
-        $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${e.message}<br><small>Switch tabs and come back to retry.</small></div>`;
+        $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${utils.esc(e.message)}<br><small>Switch tabs and come back to retry.</small></div>`;
         return;
       }
     } else if (state.levelData[tab]._error) {
@@ -264,7 +264,7 @@
         state.levelData[tab] = await api.level(tab);
       } catch (e) {
         state.levelData[tab] = { _error: e.message };
-        $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${e.message}</div>`;
+        $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${utils.esc(e.message)}</div>`;
         return;
       }
     }
@@ -325,7 +325,8 @@
       rows += `<tbody class="gb" data-gid="${gid}" data-pct="${g.pct.toFixed(6)}" data-name="${utils.esc(g.name)}">`;
       rows += `<tr class="grp">`;
       rows += `<td class="nm"><input type="checkbox" class="gpick" title="select all stocks in this group">`;
-      rows += `<span class="car">▶</span>${nm}<span class="cnt">${filtering ? filteredMembers.length : g.n}</span></td>`;
+      const nNew = members.length - g.n;
+      rows += `<span class="car">▶</span>${nm}<span class="cnt">${filtering ? filteredMembers.length : g.n}</span>${!filtering && nNew > 0 ? `<span class="cnt-new" title="new listings shown in the group, not yet in its RS index">+${nNew} new</span>` : ''}</td>`;
       rows += `<td class="sp">${spark}</td>`;
       rows += `<td class="pc"><span class="rs-pct" style="${bg}">${utils.fmtPct(g.pct)}</span>${g.dp != null ? `<span class="delta ${g.dp >= 0 ? 'up' : 'dn'}">${g.dp >= 0 ? '+' : ''}${g.dp.toFixed(0)}</span>` : ''}</td>`;
       rows += `</tr>`;
@@ -467,11 +468,15 @@
       const dBadge = (m.d != null)
         ? `<span class="delta ${m.d >= 0 ? 'up' : 'dn'}">${m.d >= 0 ? '+' : ''}${m.d.toFixed(0)}</span>`
         : '';
+      // new listing: ranked over its days since listing, not in the group index yet
+      const newBadge = m.nw
+        ? `<span class="new-badge" title="New listing — RS% over its ${m.nw} trading days since listing; joins the group index after a full window">NEW · ${m.nw}d</span>`
+        : '';
       mrows += `<tr data-sym="${utils.esc(m.s)}">
         <td class="mck"><input type="checkbox" class="pick" data-sym="${utils.esc(m.s)}"${ck}></td>
-        <td class="mnm"><button class="wstar${state.watchlist.has(m.s) ? ' on' : ''}" data-sym="${utils.esc(m.s)}" title="watchlist">${star}</button>${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span>${dBadge}</td>
+        <td class="mnm"><button class="wstar${state.watchlist.has(m.s) ? ' on' : ''}" data-sym="${utils.esc(m.s)}" title="watchlist">${star}</button>${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span>${newBadge}${dBadge}</td>
         <td class="msp">${spark}</td>
-        <td class="mpc"><span class="rs-pct" style="${bg}">${utils.fmtPct(m.p)}</span></td>
+        <td class="mpc"><span class="rs-pct${m.nw ? ' since-listing' : ''}" style="${bg}"${m.nw ? ` title="since listing (${m.nw} days)"` : ''}>${utils.fmtPct(m.p)}</span></td>
         <td class="mlt tnum">${utils.fmtPrice(m.l)}</td>
         <td class="mhi tnum">${utils.fmtOffHi(m.h)}</td>
         <td class="madr tnum">${utils.fmtAdr(m.a)}</td>
@@ -519,7 +524,7 @@
       bindBreadthEvents(data);
       bindMacroEvents(data);
     } catch (e) {
-      $.content.innerHTML = `<div class="brd-empty">Failed to load breadth data: ${e.message}</div>`;
+      $.content.innerHTML = `<div class="brd-empty">Failed to load breadth data: ${utils.esc(e.message)}</div>`;
     }
   }
 
@@ -823,7 +828,7 @@
       state.rotationData = data;
       drawRotation(data);
     }).catch(e => {
-      $.content.innerHTML = `<div class="brd-empty">Failed to load rotation data: ${e.message}</div>`;
+      $.content.innerHTML = `<div class="brd-empty">Failed to load rotation data: ${utils.esc(e.message)}</div>`;
     });
   }
 
@@ -1093,7 +1098,7 @@
       state.adrFilter.on || state.rsFilter.on || state.rseFilter || state.watchlistOnly;
     const head = ['level', 'group', 'group_n', 'group_rs_pct', 'group_delta',
       'symbol', 'name', 'rs_pct', 'delta', 'ltp', 'ema20', 'ema50', 'ema100',
-      'ema150', 'ema200', 'off_high_pct', 'adr_pct', 'rs_ema21'];
+      'ema150', 'ema200', 'off_high_pct', 'adr_pct', 'rs_ema21', 'new_listing_days'];
     const lines = [head.join(',')];
     const esc = s => `"${String(s == null ? '' : s).replace(/"/g, '""')}"`;
     for (const g of data.groups) {
@@ -1104,13 +1109,13 @@
         lines.push([tab, g.name, g.n, (g.pct * 100).toFixed(1),
           g.dp != null ? g.dp.toFixed(1) : '', m.s, m.n, (m.p * 100).toFixed(1),
           m.d != null ? m.d.toFixed(1) : '', m.l, ...(m.e || []), m.h, m.a,
-          m.b === 1 ? 'above' : (m.b === 0 ? 'below' : '')].map(esc).join(','));
+          m.b === 1 ? 'above' : (m.b === 0 ? 'below' : ''), m.nw].map(esc).join(','));
       }
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `nse_rs_${tab}_${(state.meta.gen || '').split(' ')[0] || 'export'}.csv`;
+    a.download = `nse_rs_${tab}_${(state.meta.generated || '').split(' ')[0] || 'export'}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1469,6 +1474,7 @@
                     state.levelData = {};
                     state.groupMembers = {};
                     state.breadthData = null;
+                    state.rotationData = null;
                     document.getElementById('meta-drange').textContent = meta.drange;
                     document.getElementById('stat-gen').textContent = (meta.generated || '').split(' ')[0] || '';
                     document.getElementById('stat-gen-sub').textContent = (meta.generated || '').split(' ')[1] || '';
@@ -1535,7 +1541,7 @@
     try {
       await bootApi();
     } catch (e) {
-      $.content.innerHTML = `<div class="brd-empty">Failed to load data.<br><br><code>${e.message}</code></div>`;
+      $.content.innerHTML = `<div class="brd-empty">Failed to load data.<br><br><code>${utils.esc(e.message)}</code></div>`;
       return;
     }
     if (staticData) {
@@ -1554,7 +1560,7 @@
       state.meta = meta;
       state.levels = levels;
     } catch (e) {
-      $.content.innerHTML = `<div class="brd-empty">Failed to connect to backend.<br><br><code>${e.message}</code></div>`;
+      $.content.innerHTML = `<div class="brd-empty">Failed to connect to backend.<br><br><code>${utils.esc(e.message)}</code></div>`;
       return;
     }
 
