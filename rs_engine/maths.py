@@ -180,3 +180,18 @@ def equal_weight_rs(members_series, bench_series, ref_dates):
 
 # --------------------------------------------------------------------------- #
 #  Market-breadth oscillator (Zanger / McClellan style)
+
+
+def period_return(closes_by_date, sessions):
+    """% change over the last `sessions` sessions, close to close (21 ≈ 1
+    month, 63 ≈ 3 months).  None when the history is shorter or a
+    corporate-action break falls inside the period (a demerger is not a
+    gain)."""
+    dates = sorted(closes_by_date)
+    if len(dates) <= sessions:
+        return None
+    window = dates[-(sessions + 1):]
+    if last_break_date({d: closes_by_date[d] for d in window}, sessions + 1):
+        return None
+    a, b = closes_by_date[window[0]], closes_by_date[window[-1]]
+    return (b / a - 1) * 100.0 if a else None

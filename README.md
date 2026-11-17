@@ -35,6 +35,14 @@ with:
   badged **NEW · Nd** and ranked over their days since listing — sorted by
   RS% together with the other stocks, but kept out of the group index until they have a full
   window (so a 2-day-old stock can't swing its group).
+- **Scans** tab — scan summary of the **1-month / 3-month gainers** (up ≥ an
+  editable threshold, default 20% / 30%), broken down by Macro, Sector,
+  Industry, Basic Industry or **Market cap**: a donut of the split plus, per
+  group, the stock count, share of the list, "x of N" of the whole group and
+  the median RS / 1M / 3M; click a group for its stocks.  Size classes come
+  from NSE's NIFTY 100 / Midcap 150 / Smallcap 250 lists
+  (`nse_cap_classes.csv`, refreshed daily); other stocks are Micro, or
+  "Unclassified" while on NSE for under ~6 months.
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method

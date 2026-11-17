@@ -32,6 +32,9 @@ class MemberOut(BaseModel):
     h: float | None      # % off 52-week high
     a: float | None      # ADR%
     nw: int | None = None   # new listing: days since listing (RS% over those days)
+    m1: float | None = None   # % return over 21 sessions (~1 month)
+    m3: float | None = None   # % return over 63 sessions (~3 months)
+    cap: str | None = None    # Large / Mid / Small / Micro / New (size class)
 
 
 class GroupOut(BaseModel):

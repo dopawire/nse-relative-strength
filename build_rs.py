@@ -53,7 +53,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               standard_company)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
-                             equal_weight_rs)
+                             equal_weight_rs, period_return)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
 from rs_engine.rotation import compute_rotation
@@ -64,6 +64,8 @@ from rs_engine.report import write_daily_report
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
 SYMBOL_CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")  # old,new,isin,date
+CAP_CLASSES  = os.path.join(HERE, "nse_cap_classes.csv")       # symbol,cap (Large/Mid/Small)
+NEW_LISTING_DAYS = 183     # not in a size index: "New" if listed within ~6 months
 
 # Cache file locations (CACHE_DIR itself lives in rs_engine.config).
 PRICE_CACHE  = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # {sym: {date: close}}
@@ -131,6 +133,26 @@ def read_universe():
         for key in ("macro", "sector", "industry", "basic"):
             r[key] = standard_name(r[key])
     return rows
+
+
+def read_cap_classes():
+    """{symbol: "Large" | "Mid" | "Small"} from NSE's NIFTY 100 / Midcap 150 /
+    Smallcap 250 lists (refresh_classification.py keeps them current)."""
+    if not os.path.exists(CAP_CLASSES):
+        return {}
+    with open(CAP_CLASSES, newline="", encoding="utf-8") as fh:
+        return {r["symbol"].strip().upper(): r["cap"].strip() for r in csv.DictReader(fh)}
+
+
+def cap_class(sym, caps, first_date, as_of):
+    """Size class: an index member's class; otherwise Micro — unless the stock
+    listed within ~6 months (after NSE's last semi-annual rebalance could
+    have counted it), when it is "New": a fresh mega-IPO is not a micro cap.
+    By listing DATE, not bar count — thinly traded stocks have few bars."""
+    if sym in caps:
+        return caps[sym]
+    age = (dt.date.fromisoformat(as_of) - dt.date.fromisoformat(first_date)).days
+    return "New" if age < NEW_LISTING_DAYS else "Micro"
 
 
 def read_symbol_changes():
@@ -808,6 +830,9 @@ def save_rs_json(levels, breadth, meta, path, rotation=None):
                     "h": round(m["hi52"], 1) if m.get("hi52") is not None else None,
                     "a": round(m["adr"], 2) if m.get("adr") is not None else None,
                     "nw": m.get("new"),       # new listing: days since listing
+                    "m1": round(m["m1"], 2) if m.get("m1") is not None else None,
+                    "m3": round(m["m3"], 2) if m.get("m3") is not None else None,
+                    "cap": m.get("cap"),      # Large / Mid / Small / Micro / New
                 })
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
@@ -943,6 +968,7 @@ def main():
     # ---- group members and compute RS for one classification level ----
     skipped_breaks = []
     stock_cache = {}       # sym -> metrics (shared by all four levels)
+    caps = read_cap_classes()
 
     def stock_metrics(u, ser):
         """Full-window metrics, or — for a stock listed INSIDE the window with
@@ -969,7 +995,9 @@ def main():
                       "rse": rs_ema_flag(post, bench),
                       "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
                       "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk),
-                      "new": new}
+                      "new": new,
+                      "m1": period_return(ser, 21), "m3": period_return(ser, 63),
+                      "cap": cap_class(sym, caps, min(ser), ref_dates[-1])}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row

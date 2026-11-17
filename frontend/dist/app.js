@@ -23,6 +23,7 @@
     watchlistOnly: false,
     rotationData: null,   // cached rotation RS-lines
     rotRange: '6M',       // rotation period: ~2px per session → every day hoverable
+    scan: { kind: 'm1', min: { m1: 20, m3: 30 }, dim: 'sector', open: null },
     selected: new Set(), // selected symbols for TradingView export
     breadthData: null,   // cached breadth oscillator data
     theme: 'dark',
@@ -218,8 +219,8 @@
     state.activeTab = tab;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Toolbars: level tables get search + filters; New Listings gets search only
-    const isLevel = !['breadth', 'rotation', 'ipo'].includes(tab);
-    $.toolbarSection.style.display = (tab === 'breadth' || tab === 'rotation') ? 'none' : '';
+    const isLevel = !['breadth', 'rotation', 'ipo', 'scans'].includes(tab);
+    $.toolbarSection.style.display = ['breadth', 'rotation', 'scans'].includes(tab) ? 'none' : '';
     $.toolbarSection.classList.toggle('search-only', tab === 'ipo');
     $.note.style.display = isLevel ? '' : 'none';
     renderTab(tab);
@@ -246,6 +247,10 @@
     }
     if (tab === 'ipo') {
       renderIpo();
+      return;
+    }
+    if (tab === 'scans') {
+      await renderScans();
       return;
     }
 
@@ -277,6 +282,8 @@
   function refreshCurrentView() {
     if (state.activeTab === 'breadth') {
       renderBreadth(true);   // use cached data — avoid re-fetching
+    } else if (state.activeTab === 'scans') {
+      if (state.levelData.macro && state.levelData.macro.groups) drawScans();
     } else if (state.activeTab === 'ipo') {
       renderIpo();
     } else if (state.levelData[state.activeTab]) {
@@ -924,7 +931,7 @@
 
   function renderIpo() {
     const ipo = (state.meta && state.meta.ipo) || [];
-    const win = ((state.meta && state.meta.window_dates) || []).length || 26;
+    const win = (state.meta && state.meta.window) || 26;
     const q = ($.searchInput.value || '').trim().toLowerCase();
     const shown = ipoMatches(ipo, q);
     $.searchInfo.textContent = q ? `${shown.length} of ${ipo.length} new listing(s)` : '';
@@ -972,6 +979,191 @@
       ${ranked('Too new to measure', fresh, 'first session only')}`;
     $.content.querySelectorAll('.ipo-row').forEach(r => {
       r.addEventListener('click', () => openStockModal(r.dataset.sym));
+    });
+  }
+
+
+  // =========================================================================
+  // SCANS: a scan's stocks broken down by level or market-cap class
+  // =========================================================================
+  const SCANS = {
+    m1: { label: '1M gainers', title: '1-month gainers', span: '21 sessions' },
+    m3: { label: '3M gainers', title: '3-month gainers', span: '63 sessions' },
+  };
+  const SCAN_DIMS = [['macro', 'Macro'], ['sector', 'Sector'], ['industry', 'Industry'],
+    ['basic', 'Basic Industry'], ['cap', 'Market cap']];
+  const CAP_ORDER = ['Large', 'Mid', 'Small', 'Micro', 'New'];
+  const CAP_LABEL = { Large: 'Large cap', Mid: 'Mid cap', Small: 'Small cap', Micro: 'Micro cap',
+    New: 'Unclassified · on NSE < 6M' };
+  const SCAN_SLOTS = 5;   // coloured donut segments; smaller groups fold into "Other"
+
+  async function renderScans() {
+    // a stock's sector / industry / basic group comes from each level's members
+    try {
+      for (const lv of state.levels) {
+        if (!state.levelData[lv.key] || state.levelData[lv.key]._error) {
+          state.levelData[lv.key] = await api.level(lv.key);
+        }
+      }
+    } catch (e) {
+      $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${utils.esc(e.message)}</div>`;
+      return;
+    }
+    drawScans();
+  }
+
+  function median(xs) {
+    const v = xs.filter(x => x != null).sort((a, b) => a - b);
+    if (!v.length) return null;
+    const h = v.length >> 1;
+    return v.length % 2 ? v[h] : (v[h - 1] + v[h]) / 2;
+  }
+
+  // Donut of the scan's split: one stroked circle per segment, 2px surface gap
+  function scanDonut(segs, total, groupsN) {
+    const R = 74, W = 22, C = 2 * Math.PI * R, GAP = 2;
+    let off = 0;
+    const arcs = segs.map((sg, i) => {
+      const len = total ? C * sg.n / total : 0;
+      const dash = Math.max(0, len - (segs.length > 1 ? GAP : 0));
+      const el = `<circle class="sd-seg" data-i="${i}" r="${R}" cx="100" cy="100" fill="none"
+        style="stroke:${sg.color}" stroke-width="${W}" stroke-dasharray="${dash.toFixed(2)} ${(C - dash).toFixed(2)}"
+        stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 100 100)"/>`;
+      off += len;
+      return el;
+    }).join('');
+    return `<svg class="scan-donut" viewBox="0 0 200 200" role="img"
+      aria-label="${total} stocks split across ${groupsN} groups">
+      <circle r="${R}" cx="100" cy="100" fill="none" class="sd-track" stroke-width="${W}"/>
+      ${arcs}
+      <text x="100" y="98" text-anchor="middle" class="sd-hero">${total}</text>
+      <text x="100" y="122" text-anchor="middle" class="sd-sub">stocks · ${groupsN} group${groupsN === 1 ? '' : 's'}</text>
+    </svg>`;
+  }
+
+  function drawScans() {
+    const sc = state.scan, kind = sc.kind, min = sc.min[kind], dim = sc.dim;
+    // one record per stock: the macro level lists every stock once
+    const stocks = new Map();
+    for (const g of state.levelData.macro.groups) {
+      for (const m of g.members) stocks.set(m.s, { ...m, macro: g.name });
+    }
+    for (const key of ['sector', 'industry', 'basic']) {
+      for (const g of (state.levelData[key] && state.levelData[key].groups) || []) {
+        for (const m of g.members) { const st = stocks.get(m.s); if (st) st[key] = g.name; }
+      }
+    }
+    const all = [...stocks.values()];
+    const hits = all.filter(m => m[kind] != null && m[kind] >= min);
+    const groupOf = m => (dim === 'cap' ? (m.cap || 'New') : m[dim]);
+    const total = new Map(), by = new Map();
+    for (const m of all) { const k = groupOf(m); if (k) total.set(k, (total.get(k) || 0) + 1); }
+    for (const m of hits) {
+      const k = groupOf(m);
+      if (!k) continue;
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(m);
+    }
+    const count = k => (by.get(k) || []).length;
+    const keys = dim === 'cap'
+      ? CAP_ORDER.filter(k => total.has(k))
+      : [...by.keys()].sort((a, b) => count(b) - count(a) || a.localeCompare(b));
+    // colour follows the entity: fixed per size class; otherwise the largest
+    // groups of this scan take the first slots and the rest share "Other"
+    const OTHER = 'var(--sc-other)';
+    const color = {};
+    keys.forEach((k, i) => {
+      if (dim === 'cap') color[k] = k === 'New' ? OTHER : `var(--sc-${CAP_ORDER.indexOf(k) + 1})`;
+      else color[k] = i < SCAN_SLOTS ? `var(--sc-${i + 1})` : OTHER;
+    });
+    let segs = keys.filter(k => count(k)).map(k => ({ name: dim === 'cap' ? CAP_LABEL[k] : k, n: count(k), color: color[k] }));
+    if (dim !== 'cap' && segs.length > SCAN_SLOTS) {
+      const rest = segs.slice(SCAN_SLOTS);
+      segs = segs.slice(0, SCAN_SLOTS).concat([{ name: `Other (${rest.length} groups)`,
+        n: rest.reduce((a, x) => a + x.n, 0), color: OTHER }]);
+    }
+    const n = hits.length;
+    const pct = v => (v == null ? '—' : `<span class="${v > 0 ? 'pos' : (v < 0 ? 'neg' : '')}">${v > 0 ? '+' : ''}${v.toFixed(0)}%</span>`);
+    const rows = keys.map(k => {
+      const list = by.get(k) || [], c = list.length, tot = total.get(k) || 0;
+      const share = n ? c / n * 100 : 0;
+      const rs = median(list.map(m => m.p * 100));
+      const open = sc.open === k;
+      const detail = open && c ? `<tr class="scan-detail"><td colspan="7"><table class="scan-stocks">
+        <thead><tr><th>Stock</th><th>Size</th><th>RS%</th><th>1M</th><th>3M</th><th>LTP</th></tr></thead><tbody>
+        ${list.slice().sort((a, b) => b[kind] - a[kind]).map(m => `<tr class="scan-stock" data-sym="${utils.esc(m.s)}">
+          <td class="mnm">${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span>${m.nw ? `<span class="new-badge">NEW · ${m.nw}d</span>` : ''}</td>
+          <td>${CAP_LABEL[m.cap || 'New'].replace(' · on NSE < 6M', '')}</td>
+          <td class="tnum">${Math.round(m.p * 100)}</td><td class="tnum">${pct(m.m1)}</td>
+          <td class="tnum">${pct(m.m3)}</td><td class="tnum">${utils.fmtPrice(m.l)}</td></tr>`).join('')}
+        </tbody></table></td></tr>` : '';
+      return `<tr class="scan-row${c ? '' : ' empty'}${open ? ' open' : ''}" data-key="${utils.esc(k)}">
+        <td class="sg-name"><span class="sw" style="background:${c ? color[k] : 'transparent'}"></span>${utils.esc(dim === 'cap' ? CAP_LABEL[k] : k)}</td>
+        <td class="tnum sg-n">${c}</td>
+        <td class="sg-share"><span class="bar"><span style="width:${share.toFixed(1)}%;background:${color[k]}"></span></span><span class="tnum">${c ? share.toFixed(0) + '%' : '—'}</span></td>
+        <td class="tnum sg-of">${c} of ${tot} <span class="muted">(${tot ? (c / tot * 100).toFixed(tot >= 1000 || c / tot < 0.1 ? 1 : 0) : 0}%)</span></td>
+        <td class="tnum">${rs == null ? '—' : Math.round(rs)}</td>
+        <td class="tnum">${pct(median(list.map(m => m.m1)))}</td>
+        <td class="tnum">${pct(median(list.map(m => m.m3)))}</td>
+      </tr>${detail}`;
+    }).join('');
+    const asOf = ((state.meta && state.meta.drange) || '').split('→').pop().trim();   // window end
+    const fmtDay = d => { const [y, mo, da] = d.split('-'); return `${+da} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mo - 1]} ${y}`; };
+    const nGroups = keys.filter(k => count(k)).length;
+    $.content.innerHTML = `<div class="scan-card">
+      <div class="scan-head">
+        <div><div class="scan-title">Scan summary · ${SCANS[kind].title}</div>
+          <div class="scan-sub">${n} stocks · as of ${/^\d{4}-\d\d-\d\d$/.test(asOf) ? fmtDay(asOf) : '—'} · up ≥
+            <input id="scan-min" class="scan-min" type="number" min="0" step="5" value="${min}">% over ${SCANS[kind].span}</div></div>
+        <div class="scan-ctrls">
+          <div class="seg">${Object.entries(SCANS).map(([k, v]) => `<button type="button" data-scan="${k}" class="${k === kind ? 'on' : ''}">${v.label}</button>`).join('')}</div>
+          <div class="seg">${SCAN_DIMS.map(([k, v]) => `<button type="button" data-dim="${k}" class="${k === dim ? 'on' : ''}">${v}</button>`).join('')}</div>
+        </div>
+      </div>
+      <div class="scan-body">
+        <div class="scan-viz">${scanDonut(segs, n, nGroups)}<div class="mtip scan-tip" id="scan-tip"></div></div>
+        <div class="scan-table-wrap"><table class="scan-table">
+          <thead><tr><th>${SCAN_DIMS.find(d => d[0] === dim)[1].replace('Market cap', 'Size')}</th><th>Stocks</th><th>Share of list</th>
+            <th title="scan stocks / all stocks in the group">Of the group</th>
+            <th title="median RS_STS% of the group's scan stocks">RS</th>
+            <th title="median 1-month return">1M</th><th title="median 3-month return">3M</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="brd-empty">No stock is up ≥ ${min}% over ${SCANS[kind].span}.</td></tr>`}</tbody>
+        </table></div>
+      </div>
+      <div class="scan-foot">Click a row for its stocks · click a stock for its RS chart · RS / 1M / 3M are medians of the group's scan stocks · size classes from NSE's NIFTY 100 / Midcap 150 / Smallcap 250 lists</div>
+    </div>`;
+
+    const root = $.content;
+    root.querySelectorAll('[data-scan]').forEach(b => b.addEventListener('click', () => {
+      sc.kind = b.dataset.scan; sc.open = null; drawScans();
+    }));
+    root.querySelectorAll('[data-dim]').forEach(b => b.addEventListener('click', () => {
+      sc.dim = b.dataset.dim; sc.open = null; drawScans();
+    }));
+    const inp = root.querySelector('#scan-min');
+    inp.addEventListener('change', () => {
+      const v = parseFloat(inp.value);
+      if (!isNaN(v)) { sc.min[kind] = v; sc.open = null; drawScans(); }
+    });
+    root.querySelectorAll('.scan-row:not(.empty)').forEach(r => r.addEventListener('click', () => {
+      sc.open = sc.open === r.dataset.key ? null : r.dataset.key;
+      drawScans();
+    }));
+    root.querySelectorAll('.scan-stock').forEach(r => r.addEventListener('click', ev => {
+      ev.stopPropagation();
+      openStockModal(r.dataset.sym);
+    }));
+    const tip = root.querySelector('#scan-tip');
+    root.querySelectorAll('.sd-seg').forEach(c => {
+      c.addEventListener('mousemove', ev => {
+        const sg = segs[+c.dataset.i];
+        tip.innerHTML = `<b>${utils.esc(sg.name)}</b>${sg.n} stock${sg.n === 1 ? '' : 's'} · ${(sg.n / n * 100).toFixed(0)}%`;
+        const box = c.ownerSVGElement.parentNode.getBoundingClientRect();
+        tip.style.left = (ev.clientX - box.left + 12) + 'px';
+        tip.style.top = (ev.clientY - box.top - 10) + 'px';
+        tip.style.visibility = 'visible';
+      });
+      c.addEventListener('mouseleave', () => { tip.style.visibility = 'hidden'; });
     });
   }
 
@@ -1650,6 +1842,7 @@
     tabHTML += '<button class="tab" data-tab="breadth">Market Breadth</button>';
     tabHTML += '<button class="tab" data-tab="rotation">Rotation</button>';
     tabHTML += '<button class="tab" data-tab="ipo">New Listings</button>';
+    tabHTML += '<button class="tab" data-tab="scans">Scans</button>';
     $.tabBar.innerHTML = tabHTML;
 
     // Tab click handlers
@@ -1681,7 +1874,7 @@
     // Route to the correct tab from URL hash
     const initialTab = getHashTab();
     // Validate against known levels
-    const validTabs = state.levels.map(l => l.key).concat(['breadth', 'rotation', 'ipo']);
+    const validTabs = state.levels.map(l => l.key).concat(['breadth', 'rotation', 'ipo', 'scans']);
     const tab = validTabs.includes(initialTab) ? initialTab : 'macro';
     if (tab !== initialTab) setHashTab(tab);
     else activateTab(tab);

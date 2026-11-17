@@ -180,3 +180,39 @@ def test_standard_company_keeps_acronyms():
     assert f("DHARAN INFRA-EPC LIMITED") == "Dharan Infra-EPC Limited"
     assert f("SKY GOLD AND DIAMONDS LIMITED") == "Sky Gold and Diamonds Limited"
     assert f("HDFC Bank Limited") == "HDFC Bank Limited"                # mixed: untouched
+
+
+def test_period_return_and_corporate_action_guard():
+    from rs_engine.maths import period_return
+    days = [f"2026-10-{d:02d}" for d in range(1, 31)]
+    ser = {d: 100.0 + i for i, d in enumerate(days)}          # 30 bars
+    assert period_return(ser, 21) == pytest.approx((129 / 108 - 1) * 100)
+    assert period_return(ser, 63) is None                      # too short
+    ser[days[-5]] = ser[days[-6]] * 3                          # +200% "day" inside
+    assert period_return(ser, 21) is None                      # demerger ≠ gain
+
+
+def test_cap_class_by_index_and_listing_date():
+    caps = {"TCS": "Large", "PERSISTENT": "Mid", "KAYNES": "Small"}
+    assert build_rs.cap_class("TCS", caps, "2024-01-01", "2026-11-17") == "Large"
+    assert build_rs.cap_class("OLDCO", caps, "2024-01-01", "2026-11-17") == "Micro"
+    assert build_rs.cap_class("JPL", caps, "2026-10-28", "2026-11-17") == "New"
+
+
+def test_cap_classes_not_rewritten_from_a_partial_download(tmp_path, monkeypatch):
+    path = tmp_path / "caps.csv"
+    path.write_text("symbol,cap\nTCS,Large\n")
+    monkeypatch.setattr(rc, "CAP_CLASSES", str(path))
+
+    class Resp:
+        def __init__(self, n):
+            self.status_code, self.text = 200, "Symbol\n" + "\n".join(f"S{i}" for i in range(n))
+
+    sizes = iter([100, 150, 12])                              # smallcap list truncated
+    monkeypatch.setattr(rc.requests, "get", lambda *a, **k: Resp(next(sizes)))
+    rc.sync_cap_classes()
+    assert path.read_text() == "symbol,cap\nTCS,Large\n"      # unchanged
+    sizes = iter([100, 150, 250])
+    rc.sync_cap_classes()
+    rows = _read(path)
+    assert len(rows) == 500 and {r["cap"] for r in rows} == {"Large", "Mid", "Small"}

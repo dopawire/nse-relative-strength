@@ -12,6 +12,8 @@ What it does:
      (Plain requests/curl_cffi get 403 here; only a real browser session works.)
   4. Appends the new rows to nse_stock_master.csv.
   5. Merges NSE's published trading holidays into nse_holidays.csv.
+  6. Refreshes the market-cap classes (nse_cap_classes.csv) from NSE's
+     NIFTY 100 / Midcap 150 / Smallcap 250 constituent lists.
 
 Why a browser: NSE's GetQuoteApi sits behind Akamai Bot Manager, which needs a
 JS-validated _abck cookie. Playwright runs that JS, so the fetch succeeds just
@@ -46,6 +48,14 @@ DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
 HOLIDAYS = os.path.join(HERE, "nse_holidays.csv")
 OVERRIDES = os.path.join(HERE, "nse_classification_overrides.csv")  # hand-checked fixes
 LEVEL_FIELDS = ["macro", "sector", "industry", "basicIndustry"]
+CAP_CLASSES = os.path.join(HERE, "nse_cap_classes.csv")   # symbol,cap
+# SEBI/AMFI size classes by full market-cap rank, as NSE's indices track
+# them: top 100 = large, next 150 = mid, next 250 = small (rest: micro).
+CAP_INDEX_LISTS = [
+    ("Large", "https://nsearchives.nseindia.com/content/indices/ind_nifty100list.csv", 100),
+    ("Mid", "https://nsearchives.nseindia.com/content/indices/ind_niftymidcap150list.csv", 150),
+    ("Small", "https://nsearchives.nseindia.com/content/indices/ind_niftysmallcap250list.csv", 250),
+]
 HOLIDAY_API = "https://www.nseindia.com/api/holiday-master?type=trading"
 EQUITY_L = "https://nsearchives.nseindia.com/content/equities/EQUITY_L.csv"
 FIELDS = ["symbol", "company", "series", "isin",
@@ -191,6 +201,31 @@ def sync_holidays():
     print(f"Holiday calendar: added {added}")
 
 
+def sync_cap_classes():
+    """Rewrite nse_cap_classes.csv from NSE's size-index constituent lists —
+    only when all three download complete (a partial set would silently
+    demote stocks to micro).  NSE rebalances them twice a year."""
+    rows = []
+    for cap, url, size in CAP_INDEX_LISTS:
+        try:
+            r = requests.get(url, headers={"User-Agent": NSE_UA}, timeout=30)
+            syms = [(row.get("Symbol") or "").strip().upper()
+                    for row in csv.DictReader(io.StringIO(r.text))] if r.status_code == 200 else []
+        except requests.RequestException:
+            syms = []
+        syms = [x for x in syms if x]
+        if len(syms) < 0.95 * size:
+            print(f"Market-cap classes: {cap} list unavailable ({len(syms)} rows) — unchanged.")
+            return
+        rows += [{"symbol": x, "cap": cap} for x in syms]
+    tmp = CAP_CLASSES + ".tmp"
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["symbol", "cap"])
+        w.writeheader()
+        w.writerows(sorted(rows, key=lambda r: r["symbol"]))
+    os.replace(tmp, CAP_CLASSES)
+
+
 def reconcile(master, live, dry_run=False):
     """Sync the master with NSE's list for symbols that left it.
       * renamed (same ISIN now trades under another symbol): the row moves to
@@ -317,6 +352,7 @@ def main():
         return
 
     sync_holidays()
+    sync_cap_classes()
 
     new_from_http = [s for s in live if s not in have] if live else []
     if args.stubs_only:

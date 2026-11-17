@@ -817,7 +817,10 @@ def test_members_have_rs_ema21_flag(rs_data, price_cache):
     for lvl in rs_data["levels"]:
         for g in lvl["groups"][::17]:
             for m in g["members"][:1]:
-                expect = rs_ema_flag(price_cache[m["s"]], bench)
+                ser = price_cache[m["s"]]
+                brk = build_rs.last_break_date(ser, 252)     # post-break bars only
+                post = {d: v for d, v in ser.items() if d >= brk} if brk else ser
+                expect = rs_ema_flag(post, bench)
                 assert m["b"] == expect, (m["s"], m["b"], expect)
                 checked += 1
     assert checked >= 10
@@ -861,7 +864,10 @@ def test_rs_pct_matches_full_precision_recompute(price_cache, rs_data):
                 sample.append((lvl["key"], g["name"], m["s"], m["p"]))
     assert len(sample) >= 15
     for key, gname, sym, stored in sample:
-        srs, _ = equal_weight_rs([price_cache[sym]], bench, ref_dates)
+        ser = price_cache[sym]
+        # a new listing is ranked over its sessions since listing
+        dates = [d for d in ref_dates if d >= min(ser)]
+        srs, _ = equal_weight_rs([ser], bench, dates)
         full = round(percentrank_inc(srs, srs[-1]), 4)
         assert full == pytest.approx(stored, abs=1e-9), (key, gname, sym, stored, full)
 
@@ -878,3 +884,15 @@ def test_ema_flags_restart_after_corporate_action():
     assert ema_flags(ser)[0][0] == 0                     # naive: "below EMA20"
     post = {d: v for d, v in ser.items() if d >= brk}
     assert ema_flags(post)[0] == [-1] * len(build_rs.EMA_PERIODS)
+
+
+def test_members_carry_returns_and_size_class(rs_data):
+    """Scans need 1M / 3M returns and a size class on every member, with the
+    size classes matching NSE's index sizes (<= 100 / 150 / 250)."""
+    from collections import Counter
+    ms = {m["s"]: m for g in rs_data["levels"][0]["groups"] for m in g["members"]}
+    caps = Counter(m.get("cap") for m in ms.values())
+    assert set(caps) <= {"Large", "Mid", "Small", "Micro", "New"}
+    assert 0 < caps["Large"] <= 100 and 0 < caps["Mid"] <= 150 and 0 < caps["Small"] <= 251
+    with_m1 = [m for m in ms.values() if m.get("m1") is not None]
+    assert len(with_m1) > 0.8 * len(ms)

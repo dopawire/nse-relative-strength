@@ -232,3 +232,28 @@ def test_rotation_draws_every_session(server, browser):
     page.wait_for_timeout(300)
     assert page.eval_on_selector("#rot-0 polyline", count) == n_all
     ctx.close()
+
+
+@skip_browser
+def test_scans_page_breaks_down_gainers(server, browser):
+    """Scans: deep link works, the sector split adds up to the scan count, the
+    market-cap view lists the size classes, and the threshold re-filters."""
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server + "/#/scans", wait_until="networkidle", timeout=30000)
+    page.wait_for_selector(".scan-card")
+    n = int(page.text_content(".sd-hero"))              # SVG text
+    counts = [int(c.inner_text()) for c in page.query_selector_all(".scan-row .sg-n")]
+    assert sum(counts) == n
+    page.click("[data-dim='cap']")
+    page.wait_for_timeout(200)
+    names = [r.inner_text().split("\t")[0].strip() for r in page.query_selector_all(".scan-row")]
+    assert names[:4] == ["Large cap", "Mid cap", "Small cap", "Micro cap"]
+    page.fill("#scan-min", "1000")
+    page.press("#scan-min", "Enter")
+    page.wait_for_timeout(200)
+    assert page.text_content(".sd-hero") == "0"
+    assert errors == [], errors
+    ctx.close()
