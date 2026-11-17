@@ -1,5 +1,6 @@
 """Tests for new-listing / rename / delisting handling and per-stock gap fills."""
 import csv
+import datetime as dt
 
 import pytest
 
@@ -39,7 +40,8 @@ def test_reconcile_renames_merges_and_archives(tmp_path, monkeypatch):
     filler = [(f"F{i}", f"FI{i}") for i in range(30)]   # clear the truncation guard
     master += [_row(s, i) for s, i in filler]
     live = _live(("KEEP", "I1"), ("NEWNAME", "I2"), ("NEWDUP", "I3"), *filler)
-    out = rc.reconcile(master, live)
+    prices = {"__BENCH__": {"2026-11-17": 1.0}}          # GONE has no prices: stopped
+    out = rc.reconcile(master, live, prices=prices)
     by = {r["symbol"]: r for r in out if not r["symbol"].startswith("F")}
     assert sorted(by) == ["KEEP", "NEWDUP", "NEWNAME"]
     assert by["NEWNAME"]["macro"] == "Finance"      # classification carried over
@@ -216,3 +218,36 @@ def test_cap_classes_not_rewritten_from_a_partial_download(tmp_path, monkeypatch
     rc.sync_cap_classes()
     rows = _read(path)
     assert len(rows) == 500 and {r["cap"] for r in rows} == {"Large", "Mid", "Small"}
+
+
+def test_reconcile_keeps_listed_off_list_stocks_that_still_trade(tmp_path, monkeypatch):
+    """NSE's list drops thin BE/BZ stocks on some days: a stock missing from it
+    but still printing prices stays; a frozen / silent one is archived; with no
+    price data nothing is archived."""
+    _patch_paths(tmp_path, monkeypatch)
+    bench = {f"2026-11-{d:02d}": 1.0 for d in range(2, 18) if dt.date(2026, 11, d).weekday() < 5}
+    days = sorted(bench)
+    prices = {"__BENCH__": bench,
+              "THIN": {d: 10.0 + (i % 3) for i, d in enumerate(days)},      # trades
+              "FROZEN": {d: 5.0 for d in days},                              # carry
+              "SILENT": {d: 7.0 + i for i, d in enumerate(days[:3])}}        # stopped
+    filler = [(f"F{i}", f"FI{i}") for i in range(30)]
+    master = [_row("THIN", "I1", "Energy"), _row("FROZEN", "I2", "Energy"),
+              _row("SILENT", "I3", "Energy")] + [_row(s, i) for s, i in filler]
+    live = _live(*filler)
+    out = {r["symbol"] for r in rc.reconcile(list(master), live, prices=prices)}
+    assert "THIN" in out and not {"FROZEN", "SILENT"} & out
+    assert [r["symbol"] for r in _read(rc.DELISTED)] == ["FROZEN", "SILENT"]
+    assert {r["symbol"] for r in rc.reconcile(list(master), live, prices=None)} >= {"FROZEN", "SILENT"}
+
+
+def test_archived_stock_comes_back_with_its_classification(tmp_path, monkeypatch):
+    _patch_paths(tmp_path, monkeypatch)
+    (tmp_path / "delisted.csv").write_text(
+        ",".join(rc.FIELDS + ["delisted_on"]) + "\n"
+        "LASA,Lasa Ltd,BE,INE670X01014,Healthcare,Healthcare,Pharmaceuticals & Biotechnology,"
+        "Pharmaceuticals,2026-11-03\n")
+    master = []
+    rc.add_stubs(master, _live(("LASA", "INE670X01014")), ["LASA"])
+    assert master[0]["macro"] == "Healthcare" and rc.is_classified(master[0])
+    assert _read(rc.DELISTED) == []                    # left the archive

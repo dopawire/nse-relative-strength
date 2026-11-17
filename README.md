@@ -119,8 +119,10 @@ Each run first calls `refresh_classification.py`, so new NSE listings reach
 the **New Listings** tab the day they trade.  Without a working browser (or
 from a geo-blocked IP) they are added unclassified and classified on a later
 run; renamed symbols (same ISIN) are merged and logged in
-`nse_symbol_changes.csv`, and symbols that left NSE are archived to
-`nse_delisted.csv`.
+`nse_symbol_changes.csv`, and symbols that left NSE's list **and** stopped
+trading are archived to `nse_delisted.csv` (NSE's list drops some thin BE/BZ
+stocks on some days; those stay, and an archived stock that trades or is
+listed again comes back with its classification).
 
 Optional free Telegram failure alerts: create a bot via @BotFather, then put
 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `~/.config/nse-rs/notify.env`

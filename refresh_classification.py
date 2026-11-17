@@ -31,6 +31,7 @@ Usage:
 
 import os
 import csv
+import json
 import io
 import sys
 import time
@@ -39,13 +40,15 @@ import datetime as dt
 
 import requests
 
-from rs_engine.config import CURRENT_MACROS, standard_name, standard_company
+from rs_engine.config import CURRENT_MACROS, CACHE_DIR, standard_name, standard_company
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER = os.path.join(HERE, "nse_stock_master.csv")
 CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")   # old,new,isin,date
 DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
 HOLIDAYS = os.path.join(HERE, "nse_holidays.csv")
+PRICE_CACHE = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # written by build_rs.py
+STALE_SESSIONS = 5   # no price for this many sessions = stopped trading
 OVERRIDES = os.path.join(HERE, "nse_classification_overrides.csv")  # hand-checked fixes
 LEVEL_FIELDS = ["macro", "sector", "industry", "basicIndustry"]
 CAP_CLASSES = os.path.join(HERE, "nse_cap_classes.csv")   # symbol,cap
@@ -226,13 +229,37 @@ def sync_cap_classes():
     os.replace(tmp, CAP_CLASSES)
 
 
-def reconcile(master, live, dry_run=False):
+def load_prices():
+    """The build's price cache ({sym: {date: close}}), or None if unreadable."""
+    try:
+        with open(PRICE_CACHE) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def still_trading(prices, sym):
+    """True while the stock still prints real prices: a bar within the last
+    STALE_SESSIONS sessions, and not a frozen carry (last 10 bars all equal).
+    NSE's equity list drops thinly traded / restricted-series (BE, BZ) stocks
+    on some days and lists them again later — those must not be archived."""
+    bench = sorted((prices or {}).get("__BENCH__", {}))
+    ser = (prices or {}).get(sym) or {}
+    if not bench or not ser or max(ser) < bench[-STALE_SESSIONS:][0]:
+        return False
+    return len({ser[d] for d in sorted(ser)[-10:]}) > 1
+
+
+def reconcile(master, live, dry_run=False, prices=None):
     """Sync the master with NSE's list for symbols that left it.
       * renamed (same ISIN now trades under another symbol): the row moves to
         the new symbol, keeping its classification; a duplicate row already
         added for the new symbol is merged.  Logged to nse_symbol_changes.csv
         so build_rs.py can stitch the old price history onto the new symbol.
-      * gone (no ISIN match): moved to nse_delisted.csv (archived, not lost).
+      * gone (no ISIN match) AND stopped trading (`prices`, the build's price
+        cache): moved to nse_delisted.csv (archived, not lost).  Still trading
+        → kept: the list omits some thin BE/BZ stocks on some days.  Without
+        price data nothing is archived.
     Skipped when the live list looks truncated.  Returns the new master."""
     if len(live) < 0.9 * len(master):
         print(f"NSE list has {len(live)} symbols vs master {len(master)} — "
@@ -258,6 +285,8 @@ def reconcile(master, live, dry_run=False):
                 continue                       # the new symbol's row stays
             r.update(live[new])
             keep.append(r)
+        elif prices is None or still_trading(prices, sym):
+            keep.append(r)                     # can't confirm / still trades
         else:
             gone.append(dict(r, delisted_on=today))
     if renames:
@@ -269,9 +298,41 @@ def reconcile(master, live, dry_run=False):
         return master
     if renames or gone:
         _append_csv(CHANGES, ["old", "new", "isin", "date"], renames)
+        _drop_from_archive({g["symbol"].upper() for g in gone})   # one row per symbol
         _append_csv(DELISTED, FIELDS + ["delisted_on"], gone)
         save_master(keep)
     return keep
+
+
+def _read_archive():
+    if not os.path.exists(DELISTED):
+        return []
+    with open(DELISTED, newline="", encoding="utf-8") as f:
+        return list(csv.DictReader(f))
+
+
+def _drop_from_archive(symbols):
+    rows = [r for r in _read_archive() if r["symbol"].upper() not in symbols]
+    with open(DELISTED, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDS + ["delisted_on"])
+        w.writeheader()
+        w.writerows(rows)
+
+
+def restore_still_trading(master, prices):
+    """Archived symbols that still print real prices go back into the master
+    with their classification (they were archived while NSE's list briefly
+    omitted them).  Returns the restored symbols."""
+    have = {r["symbol"].upper() for r in master}
+    latest = {r["symbol"].upper(): r for r in _read_archive()}
+    back = sorted(s for s in latest if s not in have and still_trading(prices, s))
+    for s in back:
+        master.append({k: latest[s].get(k, "") for k in FIELDS})
+    if back:
+        _drop_from_archive(set(back))
+        save_master(master)
+        print(f"Still trading — restored from the archive: {back}")
+    return back
 
 
 def _append_csv(path, fields, rows):
@@ -286,13 +347,24 @@ def _append_csv(path, fields, rows):
 
 
 def add_stubs(master, live, new_syms):
-    """Append unclassified rows (symbol/company/series/isin) for new listings.
-    They join the universe straight away — so the build prices them and the
-    New Listings tab shows them — and are re-tried as 'unfilled' next run."""
+    """Append rows for new symbols.  One archived earlier (same symbol and
+    ISIN — NSE listed it again) gets its archived classification back and
+    leaves the archive; a genuinely new listing joins unclassified, so the
+    build prices it and the New Listings tab shows it, and is re-tried as
+    'unfilled' next run."""
+    archived = {r["symbol"].upper(): r for r in _read_archive()}   # latest wins
+    restored = set()
     for s in new_syms:
         stub = {k: "" for k in FIELDS}
+        old = archived.get(s)
+        if old and old.get("isin") == live[s].get("isin"):
+            stub.update({k: old.get(k, "") for k in LEVEL_FIELDS})
+            restored.add(s)
         stub.update(live[s])
         master.append(stub)
+    if restored:
+        _drop_from_archive(restored)
+        print(f"Listed again — restored from the archive: {sorted(restored)}")
 
 
 def save_stubs_and_exit(master, live, new_syms, why):
@@ -329,8 +401,11 @@ def main():
     # Fast path: plain HTTP.  NSE geo-blocks many IPs (403) — then we fall back
     # to fetching the list inside the validated browser session below.
     live = fetch_equity_list()
+    prices = load_prices()
     if live:
-        master = reconcile(master, live, dry_run=args.dry_run)
+        master = reconcile(master, live, dry_run=args.dry_run, prices=prices)
+    if prices is not None and not args.dry_run:
+        restore_still_trading(master, prices)
     have = {r["symbol"].upper() for r in master}
     if not args.dry_run and normalise(master):
         save_master(master)
@@ -410,7 +485,7 @@ def main():
                 print("Refresh listings from an Indian IP / VPN, or skip for now.")
                 sys.exit(1)
             print(f"Browser fetch OK: {len(live)} symbols.")
-            master = reconcile(master, live)
+            master = reconcile(master, live, prices=prices)
             have = {r["symbol"].upper() for r in master}
 
         new_syms = [s for s in live if s not in have]
