@@ -194,11 +194,11 @@ def test_period_return_and_corporate_action_guard():
     assert period_return(ser, 21) is None                      # demerger ≠ gain
 
 
-def test_cap_class_by_index_and_listing_date():
+def test_cap_class_by_index_and_history():
     caps = {"TCS": "Large", "PERSISTENT": "Mid", "KAYNES": "Small"}
-    assert build_rs.cap_class("TCS", caps, "2024-01-01", "2026-11-17") == "Large"
-    assert build_rs.cap_class("OLDCO", caps, "2024-01-01", "2026-11-17") == "Micro"
-    assert build_rs.cap_class("JPL", caps, "2026-10-28", "2026-11-17") == "New"
+    assert build_rs.cap_class("TCS", caps, 500) == "Large"
+    assert build_rs.cap_class("OLDCO", caps, 62) == "Micro"      # e.g. moved from BSE
+    assert build_rs.cap_class("JPL", caps, 15) == "New"          # < 1 month: no class
 
 
 def test_cap_classes_not_rewritten_from_a_partial_download(tmp_path, monkeypatch):

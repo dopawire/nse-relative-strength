@@ -23,7 +23,7 @@
     watchlistOnly: false,
     rotationData: null,   // cached rotation RS-lines
     rotRange: '6M',       // rotation period: ~2px per session → every day hoverable
-    scan: { kind: 'm1', min: { m1: 20, m3: 30 }, dim: 'sector', open: null },
+    scan: { dim: 'cap' },   // Scans breakdown tab
     selected: new Set(), // selected symbols for TradingView export
     breadthData: null,   // cached breadth oscillator data
     theme: 'dark',
@@ -984,21 +984,21 @@
 
 
   // =========================================================================
-  // SCANS: a scan's stocks broken down by level or market-cap class
+  // SCANS: scan summary of the 1-month gainers by sector / sub-industry / size
   // =========================================================================
-  const SCANS = {
-    m1: { label: '1M gainers', title: '1-month gainers', span: '21 sessions' },
-    m3: { label: '3M gainers', title: '3-month gainers', span: '63 sessions' },
-  };
-  const SCAN_DIMS = [['macro', 'Macro'], ['sector', 'Sector'], ['industry', 'Industry'],
-    ['basic', 'Basic Industry'], ['cap', 'Market cap']];
+  // 1-month gainer: up >= 14% over 20 sessions, average daily traded value
+  // >= ₹10 crore (20 sessions), price >= ₹100 — the rule that best reproduces
+  // the reference scan (12-Nov-2026: 99 stocks, 17 / 17 / 15 / 50 by size).
+  const GAINER = { minGain: 14, minTurnoverCr: 10, minPrice: 100 };
+  const SCAN_DIMS = [['sector', 'Sector', 'sectors'], ['basic', 'Sub-industry', 'sub-industries'],
+    ['cap', 'Market cap', 'sizes']];
   const CAP_ORDER = ['Large', 'Mid', 'Small', 'Micro', 'New'];
   const CAP_LABEL = { Large: 'Large cap', Mid: 'Mid cap', Small: 'Small cap', Micro: 'Micro cap',
-    New: 'Unclassified · on NSE < 6M' };
+    New: 'No market cap' };
   const SCAN_SLOTS = 5;   // coloured donut segments; smaller groups fold into "Other"
 
   async function renderScans() {
-    // a stock's sector / industry / basic group comes from each level's members
+    // a stock's sector / sub-industry comes from those levels' members
     try {
       for (const lv of state.levels) {
         if (!state.levelData[lv.key] || state.levelData[lv.key]._error) {
@@ -1020,7 +1020,7 @@
   }
 
   // Donut of the scan's split: one stroked circle per segment, 2px surface gap
-  function scanDonut(segs, total, groupsN) {
+  function scanDonut(segs, total, groupsN, unit) {
     const R = 74, W = 22, C = 2 * Math.PI * R, GAP = 2;
     let off = 0;
     const arcs = segs.map((sg, i) => {
@@ -1033,28 +1033,29 @@
       return el;
     }).join('');
     return `<svg class="scan-donut" viewBox="0 0 200 200" role="img"
-      aria-label="${total} stocks split across ${groupsN} groups">
+      aria-label="${total} stocks across ${groupsN} ${unit}">
       <circle r="${R}" cx="100" cy="100" fill="none" class="sd-track" stroke-width="${W}"/>
       ${arcs}
       <text x="100" y="98" text-anchor="middle" class="sd-hero">${total}</text>
-      <text x="100" y="122" text-anchor="middle" class="sd-sub">stocks · ${groupsN} group${groupsN === 1 ? '' : 's'}</text>
+      <text x="100" y="122" text-anchor="middle" class="sd-sub">stocks · ${groupsN} ${unit}</text>
     </svg>`;
   }
 
   function drawScans() {
-    const sc = state.scan, kind = sc.kind, min = sc.min[kind], dim = sc.dim;
+    const dim = state.scan.dim;
     // one record per stock: the macro level lists every stock once
     const stocks = new Map();
     for (const g of state.levelData.macro.groups) {
-      for (const m of g.members) stocks.set(m.s, { ...m, macro: g.name });
+      for (const m of g.members) stocks.set(m.s, { ...m });
     }
-    for (const key of ['sector', 'industry', 'basic']) {
+    for (const key of ['sector', 'basic']) {
       for (const g of (state.levelData[key] && state.levelData[key].groups) || []) {
         for (const m of g.members) { const st = stocks.get(m.s); if (st) st[key] = g.name; }
       }
     }
     const all = [...stocks.values()];
-    const hits = all.filter(m => m[kind] != null && m[kind] >= min);
+    const hits = all.filter(m => m.m1 != null && m.m1 >= GAINER.minGain
+      && m.tv != null && m.tv >= GAINER.minTurnoverCr && m.l != null && m.l >= GAINER.minPrice);
     const groupOf = m => (dim === 'cap' ? (m.cap || 'New') : m[dim]);
     const total = new Map(), by = new Map();
     for (const m of all) { const k = groupOf(m); if (k) total.set(k, (total.get(k) || 0) + 1); }
@@ -1069,7 +1070,7 @@
       ? CAP_ORDER.filter(k => total.has(k))
       : [...by.keys()].sort((a, b) => count(b) - count(a) || a.localeCompare(b));
     // colour follows the entity: fixed per size class; otherwise the largest
-    // groups of this scan take the first slots and the rest share "Other"
+    // groups of the list take the first slots and the rest share "Other"
     const OTHER = 'var(--sc-other)';
     const color = {};
     keys.forEach((k, i) => {
@@ -1079,82 +1080,51 @@
     let segs = keys.filter(k => count(k)).map(k => ({ name: dim === 'cap' ? CAP_LABEL[k] : k, n: count(k), color: color[k] }));
     if (dim !== 'cap' && segs.length > SCAN_SLOTS) {
       const rest = segs.slice(SCAN_SLOTS);
-      segs = segs.slice(0, SCAN_SLOTS).concat([{ name: `Other (${rest.length} groups)`,
+      segs = segs.slice(0, SCAN_SLOTS).concat([{ name: `Other (${rest.length})`,
         n: rest.reduce((a, x) => a + x.n, 0), color: OTHER }]);
     }
     const n = hits.length;
-    const pct = v => (v == null ? '—' : `<span class="${v > 0 ? 'pos' : (v < 0 ? 'neg' : '')}">${v > 0 ? '+' : ''}${v.toFixed(0)}%</span>`);
+    const pctOf = (c, t) => (t ? (c / t * 100).toFixed(c / t < 0.1 ? 1 : 0) : '0.0') + '%';
     const rows = keys.map(k => {
       const list = by.get(k) || [], c = list.length, tot = total.get(k) || 0;
       const share = n ? c / n * 100 : 0;
-      const rs = median(list.map(m => m.p * 100));
-      const open = sc.open === k;
-      const detail = open && c ? `<tr class="scan-detail"><td colspan="7"><table class="scan-stocks">
-        <thead><tr><th>Stock</th><th>Size</th><th>RS%</th><th>1M</th><th>3M</th><th>LTP</th></tr></thead><tbody>
-        ${list.slice().sort((a, b) => b[kind] - a[kind]).map(m => `<tr class="scan-stock" data-sym="${utils.esc(m.s)}">
-          <td class="mnm">${utils.esc(m.n)}<span class="msym">${utils.esc(m.s)}</span>${m.nw ? `<span class="new-badge">NEW · ${m.nw}d</span>` : ''}</td>
-          <td>${CAP_LABEL[m.cap || 'New'].replace(' · on NSE < 6M', '')}</td>
-          <td class="tnum">${Math.round(m.p * 100)}</td><td class="tnum">${pct(m.m1)}</td>
-          <td class="tnum">${pct(m.m3)}</td><td class="tnum">${utils.fmtPrice(m.l)}</td></tr>`).join('')}
-        </tbody></table></td></tr>` : '';
-      return `<tr class="scan-row${c ? '' : ' empty'}${open ? ' open' : ''}" data-key="${utils.esc(k)}">
+      const rs = median(list.map(m => m.rr));
+      const m3 = median(list.map(m => m.m3));
+      return `<tr class="scan-row${c ? '' : ' empty'}">
         <td class="sg-name"><span class="sw" style="background:${c ? color[k] : 'transparent'}"></span>${utils.esc(dim === 'cap' ? CAP_LABEL[k] : k)}</td>
         <td class="tnum sg-n">${c}</td>
         <td class="sg-share"><span class="bar"><span style="width:${share.toFixed(1)}%;background:${color[k]}"></span></span><span class="tnum">${c ? share.toFixed(0) + '%' : '—'}</span></td>
-        <td class="tnum sg-of">${c} of ${tot} <span class="muted">(${tot ? (c / tot * 100).toFixed(tot >= 1000 || c / tot < 0.1 ? 1 : 0) : 0}%)</span></td>
+        <td class="tnum sg-of">${c} of ${tot} <span class="muted">(${pctOf(c, tot)})</span></td>
         <td class="tnum">${rs == null ? '—' : Math.round(rs)}</td>
-        <td class="tnum">${pct(median(list.map(m => m.m1)))}</td>
-        <td class="tnum">${pct(median(list.map(m => m.m3)))}</td>
-      </tr>${detail}`;
+        <td class="tnum">${m3 == null ? '—' : `<span class="${m3 >= 0 ? 'pos' : 'neg'}">${m3 >= 0 ? '+' : ''}${m3.toFixed(0)}%</span>`}</td>
+      </tr>`;
     }).join('');
     const asOf = ((state.meta && state.meta.drange) || '').split('→').pop().trim();   // window end
     const fmtDay = d => { const [y, mo, da] = d.split('-'); return `${+da} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mo - 1]} ${y}`; };
+    const [, label, unit] = SCAN_DIMS.find(d => d[0] === dim);
     const nGroups = keys.filter(k => count(k)).length;
     $.content.innerHTML = `<div class="scan-card">
       <div class="scan-head">
-        <div><div class="scan-title">Scan summary · ${SCANS[kind].title}</div>
-          <div class="scan-sub">${n} stocks · as of ${/^\d{4}-\d\d-\d\d$/.test(asOf) ? fmtDay(asOf) : '—'} · up ≥
-            <input id="scan-min" class="scan-min" type="number" min="0" step="5" value="${min}">% over ${SCANS[kind].span}</div></div>
-        <div class="scan-ctrls">
-          <div class="seg">${Object.entries(SCANS).map(([k, v]) => `<button type="button" data-scan="${k}" class="${k === kind ? 'on' : ''}">${v.label}</button>`).join('')}</div>
-          <div class="seg">${SCAN_DIMS.map(([k, v]) => `<button type="button" data-dim="${k}" class="${k === dim ? 'on' : ''}">${v}</button>`).join('')}</div>
-        </div>
+        <div><div class="scan-title">Scan summary · 1-month gainers</div>
+          <div class="scan-sub">${n} stocks · as of ${/^\d{4}-\d\d-\d\d$/.test(asOf) ? fmtDay(asOf) : '—'}</div></div>
+        <div class="seg">${SCAN_DIMS.map(([k, v]) => `<button type="button" data-dim="${k}" class="${k === dim ? 'on' : ''}">${v}</button>`).join('')}</div>
       </div>
       <div class="scan-body">
-        <div class="scan-viz">${scanDonut(segs, n, nGroups)}<div class="mtip scan-tip" id="scan-tip"></div></div>
+        <div class="scan-viz">${scanDonut(segs, n, nGroups, unit)}<div class="mtip scan-tip" id="scan-tip"></div></div>
         <div class="scan-table-wrap"><table class="scan-table">
-          <thead><tr><th>${SCAN_DIMS.find(d => d[0] === dim)[1].replace('Market cap', 'Size')}</th><th>Stocks</th><th>Share of list</th>
-            <th title="scan stocks / all stocks in the group">Of the group</th>
-            <th title="median RS_STS% of the group's scan stocks">RS</th>
-            <th title="median 1-month return">1M</th><th title="median 3-month return">3M</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="7" class="brd-empty">No stock is up ≥ ${min}% over ${SCANS[kind].span}.</td></tr>`}</tbody>
+          <thead><tr><th>${dim === 'cap' ? 'Size' : label}</th><th>Stocks</th><th>Share of list</th>
+            <th>Of the group</th><th title="median RS rating (1-99)">RS</th><th title="median 3-month return">3M</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" class="brd-empty">No 1-month gainers today.</td></tr>'}</tbody>
         </table></div>
       </div>
-      <div class="scan-foot">Click a row for its stocks · click a stock for its RS chart · RS / 1M / 3M are medians of the group's scan stocks · size classes from NSE's NIFTY 100 / Midcap 150 / Smallcap 250 lists</div>
     </div>`;
 
-    const root = $.content;
-    root.querySelectorAll('[data-scan]').forEach(b => b.addEventListener('click', () => {
-      sc.kind = b.dataset.scan; sc.open = null; drawScans();
-    }));
-    root.querySelectorAll('[data-dim]').forEach(b => b.addEventListener('click', () => {
-      sc.dim = b.dataset.dim; sc.open = null; drawScans();
-    }));
-    const inp = root.querySelector('#scan-min');
-    inp.addEventListener('change', () => {
-      const v = parseFloat(inp.value);
-      if (!isNaN(v)) { sc.min[kind] = v; sc.open = null; drawScans(); }
-    });
-    root.querySelectorAll('.scan-row:not(.empty)').forEach(r => r.addEventListener('click', () => {
-      sc.open = sc.open === r.dataset.key ? null : r.dataset.key;
+    $.content.querySelectorAll('[data-dim]').forEach(b => b.addEventListener('click', () => {
+      state.scan.dim = b.dataset.dim;
       drawScans();
     }));
-    root.querySelectorAll('.scan-stock').forEach(r => r.addEventListener('click', ev => {
-      ev.stopPropagation();
-      openStockModal(r.dataset.sym);
-    }));
-    const tip = root.querySelector('#scan-tip');
-    root.querySelectorAll('.sd-seg').forEach(c => {
+    const tip = $.content.querySelector('#scan-tip');
+    $.content.querySelectorAll('.sd-seg').forEach(c => {
       c.addEventListener('mousemove', ev => {
         const sg = segs[+c.dataset.i];
         tip.innerHTML = `<b>${utils.esc(sg.name)}</b>${sg.n} stock${sg.n === 1 ? '' : 's'} · ${(sg.n / n * 100).toFixed(0)}%`;

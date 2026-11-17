@@ -236,24 +236,23 @@ def test_rotation_draws_every_session(server, browser):
 
 @skip_browser
 def test_scans_page_breaks_down_gainers(server, browser):
-    """Scans: deep link works, the sector split adds up to the scan count, the
-    market-cap view lists the size classes, and the threshold re-filters."""
+    """Scans: deep link works, the market-cap split lists the size classes in
+    order and adds up to the scan count, and the sector tab adds up too."""
     ctx = browser.new_context()
     page = ctx.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(server + "/#/scans", wait_until="networkidle", timeout=30000)
     page.wait_for_selector(".scan-card")
+    assert page.inner_text(".scan-title") == "Scan summary · 1-month gainers"
     n = int(page.text_content(".sd-hero"))              # SVG text
-    counts = [int(c.inner_text()) for c in page.query_selector_all(".scan-row .sg-n")]
-    assert sum(counts) == n
-    page.click("[data-dim='cap']")
-    page.wait_for_timeout(200)
     names = [r.inner_text().split("\t")[0].strip() for r in page.query_selector_all(".scan-row")]
-    assert names[:4] == ["Large cap", "Mid cap", "Small cap", "Micro cap"]
-    page.fill("#scan-min", "1000")
-    page.press("#scan-min", "Enter")
+    assert names == ["Large cap", "Mid cap", "Small cap", "Micro cap", "No market cap"]
+    assert sum(int(c.inner_text()) for c in page.query_selector_all(".scan-row .sg-n")) == n
+    page.click("[data-dim='sector']")
     page.wait_for_timeout(200)
-    assert page.text_content(".sd-hero") == "0"
+    assert sum(int(c.inner_text()) for c in page.query_selector_all(".scan-row .sg-n")) == n
+    heads = [h.inner_text().strip().lower() for h in page.query_selector_all(".scan-table th")]
+    assert heads[1:] == ["stocks", "share of list", "of the group", "rs", "3m"]
     assert errors == [], errors
     ctx.close()

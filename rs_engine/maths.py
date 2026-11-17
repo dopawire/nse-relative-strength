@@ -195,3 +195,32 @@ def period_return(closes_by_date, sessions):
         return None
     a, b = closes_by_date[window[0]], closes_by_date[window[-1]]
     return (b / a - 1) * 100.0 if a else None
+
+
+def avg_turnover_cr(closes_by_date, volumes_by_date, sessions=20):
+    """Average daily traded value (close × shares) over the last `sessions`
+    sessions, in ₹ crore — the liquidity gauge of the scans.  None with fewer
+    than half the sessions of volume data."""
+    days = [d for d in sorted(volumes_by_date) if d in closes_by_date][-sessions:]
+    if len(days) < max(1, sessions // 2):
+        return None
+    return sum(closes_by_date[d] * volumes_by_date[d] for d in days) / len(days) / 1e7
+
+
+def rs_ratings(series_by_sym, as_of):
+    """IBD-style RS rating 1-99 for every symbol: percentile rank of the
+    weighted 12-month performance 2×3M + 6M + 9M + 12M (63 / 126 / 189 / 252
+    sessions back, closes on/before `as_of`).  Periods longer than a stock's
+    history reuse its 3M return; stocks without 3 months are unrated."""
+    score = {}
+    for sym, ser in series_by_sym.items():
+        ds = [d for d in sorted(ser) if d <= as_of]
+        if len(ds) <= 63:
+            continue
+        last = ser[ds[-1]]
+        r = [last / ser[ds[-1 - n]] - 1 if len(ds) > n else None for n in (63, 126, 189, 252)]
+        r = [x if x is not None else r[0] for x in r]
+        score[sym] = 2 * r[0] + r[1] + r[2] + r[3]
+    order = sorted(score, key=score.get)
+    n = len(order)
+    return {s: max(1, min(99, round(100 * (i + 1) / n))) for i, s in enumerate(order)}

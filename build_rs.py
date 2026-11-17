@@ -53,7 +53,8 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               standard_company)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
-                             equal_weight_rs, period_return)
+                             equal_weight_rs, period_return, avg_turnover_cr,
+                             rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
 from rs_engine.rotation import compute_rotation
@@ -65,13 +66,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
 SYMBOL_CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")  # old,new,isin,date
 CAP_CLASSES  = os.path.join(HERE, "nse_cap_classes.csv")       # symbol,cap (Large/Mid/Small)
-NEW_LISTING_DAYS = 183     # not in a size index: "New" if listed within ~6 months
+NO_CAP_SESSIONS = 20       # not in a size index and < 1 month of trading: no class yet
 
 # Cache file locations (CACHE_DIR itself lives in rs_engine.config).
 PRICE_CACHE  = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # {sym: {date: close}}
 HIGH_CACHE   = os.path.join(CACHE_DIR, ".yh_high_cache.json")    # {sym: {date: intraday high}}
 LOW_CACHE    = os.path.join(CACHE_DIR, ".yh_low_cache.json")     # {sym: {date: intraday low}}
 PROVENANCE   = os.path.join(CACHE_DIR, ".yh_provenance.json")    # {date: source} for non-Yahoo bars
+VOLUME_CACHE = os.path.join(CACHE_DIR, ".yh_volume_cache.json")   # {sym: {date: shares traded}}
 OFFICIAL_FILLS = os.path.join(CACHE_DIR, ".nse_official_fills.json")
 # {sym: {date: [close, high, low, ref_date, ref_official_close]}} — bars filled
 # from the NSE bhavcopy, re-scaled to Yahoo's adjusted series every run
@@ -144,15 +146,14 @@ def read_cap_classes():
         return {r["symbol"].strip().upper(): r["cap"].strip() for r in csv.DictReader(fh)}
 
 
-def cap_class(sym, caps, first_date, as_of):
-    """Size class: an index member's class; otherwise Micro — unless the stock
-    listed within ~6 months (after NSE's last semi-annual rebalance could
-    have counted it), when it is "New": a fresh mega-IPO is not a micro cap.
-    By listing DATE, not bar count — thinly traded stocks have few bars."""
+def cap_class(sym, caps, n_sessions):
+    """Size class: an index member's class (NIFTY 100 / Midcap 150 / Smallcap
+    250); any other stock with over a month of trading is Micro; under a
+    month there is no class yet ("New", shown as "No market cap") — a fresh
+    IPO can be any size, and such a stock can't be a 1-month gainer anyway."""
     if sym in caps:
         return caps[sym]
-    age = (dt.date.fromisoformat(as_of) - dt.date.fromisoformat(first_date)).days
-    return "New" if age < NEW_LISTING_DAYS else "Micro"
+    return "Micro" if n_sessions > NO_CAP_SESSIONS else "New"
 
 
 def read_symbol_changes():
@@ -224,9 +225,10 @@ def _session():
     return s
 
 
-def yahoo_closes(ysym, rng):
+def yahoo_closes(ysym, rng, volumes=None):
     """Fetch a Yahoo ticker over `rng`. Returns (closes, highs, lows, err), each a
-    {date: value} map. Highs feed the 52-week metric; highs+lows feed ADR%."""
+    {date: value} map. Highs feed the 52-week metric; highs+lows feed ADR%.
+    `volumes` (a dict) also receives {date: shares traded} from the same reply."""
     url = YH_URL.format(sym=requests.utils.quote(ysym), rng=rng)
     for attempt in range(4):
         try:
@@ -251,6 +253,7 @@ def yahoo_closes(ysym, rng):
         cl = quote.get("close") or []
         hg = quote.get("high") or []
         lw = quote.get("low") or []
+        vl = quote.get("volume") or []
         out, hi, lo = {}, {}, {}
         for i, (t, c) in enumerate(zip(ts, cl)):
             if c is None:
@@ -261,6 +264,8 @@ def yahoo_closes(ysym, rng):
             lwv = lw[i] if i < len(lw) else None
             hi[day] = float(h) if h is not None else float(c)
             lo[day] = float(lwv) if lwv is not None else float(c)
+            if volumes is not None and i < len(vl) and vl[i] is not None:
+                volumes[day] = int(vl[i])
         return (out, hi, lo, None) if out else (None, None, None, "empty")
     return None, None, None, "rate-limited"
 
@@ -303,7 +308,7 @@ def intraday_day(ysym, day):
             min(b[2] for b in bars))
 
 
-def fetch_prices(universe, cache, highs, lows, fast=False):
+def fetch_prices(universe, cache, highs, lows, fast=False, volumes=None):
     """Fetch daily closes + intraday highs/lows for every symbol + benchmark into
     `cache` ({sym:{date:close}}), `highs` and `lows`, benchmark under '__BENCH__'.
 
@@ -332,15 +337,18 @@ def fetch_prices(universe, cache, highs, lows, fast=False):
 
     def work(item):
         key, ysym = item
-        data, hi, lo, err = yahoo_closes(ysym, plan(key))
-        return key, data, hi, lo, err
+        vol = {}
+        data, hi, lo, err = yahoo_closes(ysym, plan(key), vol)
+        return key, data, hi, lo, vol, err
 
     def flush():
         for path, obj in ((PRICE_CACHE, cache), (HIGH_CACHE, highs), (LOW_CACHE, lows)):
             write_json_atomic(path, obj)
+        if volumes is not None:
+            write_json_atomic(VOLUME_CACHE, volumes)
 
     with cf.ThreadPoolExecutor(max_workers=YH_WORKERS) as ex:
-        for key, data, hi, lo, err in ex.map(work, jobs):
+        for key, data, hi, lo, vol, err in ex.map(work, jobs):
             done += 1
             if data:
                 cache.setdefault(key, {}).update(data)   # merge/append
@@ -348,6 +356,8 @@ def fetch_prices(universe, cache, highs, lows, fast=False):
                     highs.setdefault(key, {}).update(hi)
                 if lo:
                     lows.setdefault(key, {}).update(lo)
+                if vol and volumes is not None:
+                    volumes.setdefault(key, {}).update(vol)
                 ok += 1
             else:
                 miss.append((key, err))
@@ -833,6 +843,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None):
                     "m1": round(m["m1"], 2) if m.get("m1") is not None else None,
                     "m3": round(m["m3"], 2) if m.get("m3") is not None else None,
                     "cap": m.get("cap"),      # Large / Mid / Small / Micro / New
+                    "tv": round(m["tv"], 2) if m.get("tv") is not None else None,
+                    "rr": m.get("rr"),        # RS rating 1-99 (vs all stocks)
                 })
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
@@ -886,6 +898,7 @@ def main():
     cache = load_json_cache(PRICE_CACHE)
     highs = load_json_cache(HIGH_CACHE)
     lows = load_json_cache(LOW_CACHE)
+    volumes = load_json_cache(VOLUME_CACHE)
     changes = read_symbol_changes()
 
     if not args.html_only:
@@ -902,7 +915,7 @@ def main():
                   f"stocks): full {FULL_RANGE} history for all (re-validates history) ...")
         # renamed symbols: also pull the old ticker for its pre-rename history
         olds = [{"sym": o} for o, _n in changes if not cache.get(o)]
-        ok, miss = fetch_prices(universe + olds, cache, highs, lows, args.fast)
+        ok, miss = fetch_prices(universe + olds, cache, highs, lows, args.fast, volumes)
         print(f"Fetched/cached {ok} series; {len(miss)} failures.")
         if miss[:10]:
             print("  sample failures:", miss[:10])
@@ -969,6 +982,8 @@ def main():
     skipped_breaks = []
     stock_cache = {}       # sym -> metrics (shared by all four levels)
     caps = read_cap_classes()
+    ratings = rs_ratings({u["sym"]: cache[u["sym"]] for u in universe
+                          if cache.get(u["sym"])}, ref_dates[-1])
 
     def stock_metrics(u, ser):
         """Full-window metrics, or — for a stock listed INSIDE the window with
@@ -996,8 +1011,10 @@ def main():
                       "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
                       "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk),
                       "new": new,
-                      "m1": period_return(ser, 21), "m3": period_return(ser, 63),
-                      "cap": cap_class(sym, caps, min(ser), ref_dates[-1])}
+                      "m1": period_return(ser, 20), "m3": period_return(ser, 63),
+                      "tv": avg_turnover_cr(ser, volumes.get(sym, {}), 20),
+                      "rr": ratings.get(sym),
+                      "cap": cap_class(sym, caps, len(ser))}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row
