@@ -40,10 +40,15 @@ with:
   that best reproduced a reference scan), by Sector, Sub-industry or **Market
   cap**: a donut of the split plus stock count, share of the list, "x of N"
   of the whole group, median **RS rating** (1-99, weighted 12-month
-  performance vs all stocks) and median 3M return.  Size classes come from
-  NSE's NIFTY 100 / Midcap 150 / Smallcap 250 lists (`nse_cap_classes.csv`,
-  refreshed daily); other stocks are Micro, or "No market cap" in their
-  first month.
+  performance vs all stocks) and median 3M return, plus the **whole group's**
+  1-day and 1-week change (equal-weight average of all its stocks).  Size
+  classes come from NSE's NIFTY 100 / Midcap 150 / Smallcap 250 lists
+  (`nse_cap_classes.csv`, refreshed daily); other stocks are Micro, or "No
+  market cap" in their first month.
+- **FII / DII** tab — monthly **net** cash-market flows of foreign (FII/FPI)
+  and domestic (DII) institutions since Jun 2014 as paired bars (1Y / 3Y /
+  5Y / All), the running month marked "to <date>", with totals and a
+  month-by-month table (net, combined, gross buy / sell).
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method
@@ -77,6 +82,11 @@ with:
   refilled from the bhavcopy; bhavcopy prices are raw, so every filled bar is
   scaled to Yahoo's split/bonus-adjusted series and re-scaled on later
   adjustments (`~/.cache/nse-rs/.nse_official_fills.json`).
+- **FII / DII flows:** NSE provisional cash-market figures (₹ crore).  NSE's
+  API serves only the latest session, so the monthly history comes from Kotak
+  Neo's FII/DII page, which republishes the same numbers (they reconcile
+  exactly with NSE's daily figures); NSE's own day is recorded too, and
+  counted in the running month when Kotak hasn't caught up.
 - **Single-stock** null bars (common for fresh listings and renamed tickers)
   inside the RS window are filled from the bhavcopy too, so one missing Yahoo
   day doesn't drop a stock out of the rankings.
@@ -87,6 +97,7 @@ with:
 |---|---|
 | `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` (+ the `daily_report.html` digest). |
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
+| `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000` (`NSE_RS_HOST=0.0.0.0` to expose it on the LAN). |
@@ -110,7 +121,7 @@ in the website header.
 
 `bash install_cron.sh` installs the weekday cron entries (system timezone):
 
-- **18:30** — `cron_daily.sh`: new-listing refresh, daily build + data audit
+- **18:30** — `cron_daily.sh`: new-listing + FII/DII refresh, daily build + data audit
 - **19:30** — `cron_daily.sh --if-stale`: retries once if Yahoo published late
   and the 18:30 run missed the session
 - **hourly + @reboot** — `cron_daily.sh --if-stale`: catch-up when the machine
@@ -199,8 +210,10 @@ driver) cannot run.  The shell scripts pick the interpreter via
   hand-checked classifications for the few stocks NSE still reports under its
   retired scheme (MANUFACTURING, CONSUMER…) — the audit fails if such a value
   or a non-standard spelling reaches the master.
+- `nse_fii_dii_monthly.csv` / `nse_fii_dii_daily.csv` — FII / DII cash
+  flows (buy, sell, net in ₹ crore), maintained by `refresh_flows.py`.
 - `rs_engine/` — computation core (config, RS maths, breadth, rotation,
-  snapshots, digest); `build_rs.py` holds the data layer
+  FII/DII flows, snapshots, digest); `build_rs.py` holds the data layer
   (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.
 
 ## Notes

@@ -84,6 +84,23 @@ class RotationResponse(BaseModel):
     groups: list[RotationGroup] = []
 
 
+class FlowMonth(BaseModel):
+    m: str                 # YYYY-MM
+    fb: float              # FII gross buy (₹ crore)
+    fs: float              # FII gross sell
+    fii: float             # FII net
+    db: float              # DII gross buy
+    ds: float              # DII gross sell
+    dii: float             # DII net
+    to: str | None = None  # last recorded session of the month
+
+
+class FlowsResponse(BaseModel):
+    months: list[FlowMonth] = []
+    asof: str | None = None
+    src: str = ""
+
+
 class StockDetail(BaseModel):
     sym: str
     name: str = ""

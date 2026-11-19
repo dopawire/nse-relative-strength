@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from rs_engine.config import WINDOW, BENCHMARK_NAME
 from backend.models import (
     MetaResponse, LevelSummary, LevelResponse,
-    GroupOut, BreadthResponse, RotationResponse, StockDetail,
+    GroupOut, BreadthResponse, RotationResponse, StockDetail, FlowsResponse,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -177,6 +177,14 @@ def get_rotation():
     return {"dates": r.get("dates", []), "groups": r.get("groups", [])}
 
 
+@app.get("/api/flows", response_model=FlowsResponse)
+def get_flows():
+    """Monthly FII / DII net cash-market flows (NSE provisional, ₹ crore)."""
+    _check_ready()
+    f = _data.get("flows") or {}
+    return {"months": f.get("months", []), "asof": f.get("asof"), "src": f.get("src", "")}
+
+
 @app.get("/api/stock/{sym}", response_model=StockDetail)
 def get_stock(sym: str):
     """Per-stock RS line (stock / NIFTY 500) + its 21-day EMA — the
@@ -295,7 +303,7 @@ def refresh_stocks(dry_run: bool = Query(False, description="Only list new symbo
 
     # a real refresh is followed by a quick build, so new listings show up
     args = (["refresh_classification.py", "--dry-run"] if dry_run else
-            [["refresh_classification.py"], ["build_rs.py", "--fast"]])
+            [["refresh_classification.py"], ["refresh_flows.py"], ["build_rs.py", "--fast"]])
 
     threading.Thread(target=_run_script, args=(args, "stocks"), daemon=True).start()
     return {"status": "started", "dry_run": dry_run, "started_at": _pipeline["started_at"]}

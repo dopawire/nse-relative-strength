@@ -58,6 +58,7 @@ from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
 from rs_engine.rotation import compute_rotation
+from rs_engine.flows import build_flows
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -815,12 +816,13 @@ def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
 # --------------------------------------------------------------------------- #
 #  JSON export for the FastAPI backend
 # --------------------------------------------------------------------------- #
-def save_rs_json(levels, breadth, meta, path, rotation=None):
+def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None):
     """Write precomputed RS data so the backend can serve it without recomputing."""
     data = {
         "meta": meta,
         "breadth": breadth if breadth else {"dates": [], "osc": [], "n": 0},
         "rotation": rotation or {"dates": [], "groups": []},
+        "flows": flows or {},
         "levels": [],
     }
     gid = 0
@@ -1142,7 +1144,7 @@ def main():
         "src": prov,
         "ipo": ipo,
     }
-    save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation)
+    save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation, build_flows())
     print(f"Wrote {RS_DATA_JSON}")
     write_daily_report(os.path.join(HERE, "daily_report.html"),
                        meta, breadth, levels, ipo)

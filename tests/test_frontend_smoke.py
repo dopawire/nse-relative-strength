@@ -256,3 +256,30 @@ def test_scans_page_breaks_down_gainers(server, browser):
     assert heads[1:] == ["stocks", "share of list", "of the group", "rs", "3m", "group 1d", "group 1w"]
     assert errors == [], errors
     ctx.close()
+
+
+@skip_browser
+def test_flows_page_draws_monthly_bars(server, browser):
+    """FII / DII: deep link works, one bar pair per month in range, the table
+    matches, and the range buttons change the month count."""
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server + "/#/flows", wait_until="networkidle", timeout=30000)
+    page.wait_for_selector(".scan-card")
+    if page.query_selector(".fl-svg") is None:          # no flows data in this checkout
+        assert "No FII / DII data" in page.inner_text("#content")
+    else:
+        assert page.inner_text(".scan-title") == "FII / DII cash flows · monthly net"
+        n3 = len(page.query_selector_all(".fl-col"))
+        assert 0 < n3 <= 36
+        assert len(page.query_selector_all(".fl-table tbody tr")) == n3
+        assert len(page.query_selector_all(".fl-col .fl-fii")) == n3
+        page.click("[data-range='1Y']")
+        page.wait_for_timeout(200)
+        assert len(page.query_selector_all(".fl-col")) == min(12, n3)
+        page.hover(".fl-col:last-child .fl-hit")
+        assert "FII net" in page.inner_text("#fl-tip")
+    assert errors == [], errors
+    ctx.close()

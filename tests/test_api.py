@@ -120,3 +120,15 @@ def test_reload_drops_cached_prices(client):
     m._price_cache = {"STALE": {"2020-01-01": 1.0}}
     assert client.post("/api/reload").status_code == 200
     assert m._price_cache is None
+
+
+def test_flows(client):
+    r = client.get("/api/flows")
+    assert r.status_code == 200
+    f = r.json()
+    assert set(f) >= {"months", "asof", "src"}
+    if f["months"]:
+        ms = [x["m"] for x in f["months"]]
+        assert ms == sorted(ms) and len(set(ms)) == len(ms)
+        x = f["months"][-1]
+        assert abs(x["fb"] - x["fs"] - x["fii"]) < 1 and abs(x["db"] - x["ds"] - x["dii"]) < 1

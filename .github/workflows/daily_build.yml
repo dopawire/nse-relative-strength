@@ -48,6 +48,10 @@ jobs:
         if: steps.need.outputs.build == 'true'
         run: pip install requests
 
+      - name: Refresh FII / DII flows
+        if: steps.need.outputs.build == 'true'
+        run: python refresh_flows.py || true
+
       - name: Build rankings
         if: steps.need.outputs.build == 'true'
         run: python build_rs.py
@@ -78,7 +82,7 @@ jobs:
           git config user.name "dopawire"
           git config user.email "110220100+dopawire@users.noreply.github.com"
           gen=$(python -c "import json; print(json.load(open('rs_data.json'))['meta']['gen'])")
-          git add rs_data.json
+          git add rs_data.json nse_fii_dii_monthly.csv nse_fii_dii_daily.csv
           git commit -q -m "data snapshot $gen"
           git push
 
