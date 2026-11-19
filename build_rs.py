@@ -842,6 +842,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None):
                     "nw": m.get("new"),       # new listing: days since listing
                     "m1": round(m["m1"], 2) if m.get("m1") is not None else None,
                     "m3": round(m["m3"], 2) if m.get("m3") is not None else None,
+                    "d1": round(m["d1"], 2) if m.get("d1") is not None else None,
+                    "w1": round(m["w1"], 2) if m.get("w1") is not None else None,
                     "cap": m.get("cap"),      # Large / Mid / Small / Micro / New
                     "tv": round(m["tv"], 2) if m.get("tv") is not None else None,
                     "rr": m.get("rr"),        # RS rating 1-99 (vs all stocks)
@@ -1012,6 +1014,7 @@ def main():
                       "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk),
                       "new": new,
                       "m1": period_return(ser, 20), "m3": period_return(ser, 63),
+                      "d1": period_return(ser, 1), "w1": period_return(ser, 5),
                       "tv": avg_turnover_cr(ser, volumes.get(sym, {}), 20),
                       "rr": ratings.get(sym),
                       "cap": cap_class(sym, caps, len(ser))}

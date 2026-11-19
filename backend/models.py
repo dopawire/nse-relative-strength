@@ -34,6 +34,8 @@ class MemberOut(BaseModel):
     nw: int | None = None   # new listing: days since listing (RS% over those days)
     m1: float | None = None   # % return over 21 sessions (~1 month)
     m3: float | None = None   # % return over 63 sessions (~3 months)
+    d1: float | None = None   # % change on the last session
+    w1: float | None = None   # % return over 5 sessions (1 week)
     cap: str | None = None    # Large / Mid / Small / Micro / New (size class)
     tv: float | None = None   # avg daily traded value, last 20 sessions (₹ crore)
     rr: int | None = None     # RS rating 1-99 vs all stocks (weighted 12M performance)

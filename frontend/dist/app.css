@@ -520,6 +520,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   vertical-align:middle;margin-right:8px;overflow:hidden}
 .sg-share .bar span{display:block;height:100%;border-radius:3px}
 .sg-of .muted{color:var(--text-muted)}
+.scan-table .sg-grp{border-left:1px solid var(--border);padding-left:16px}
 .scan-table .pos{color:var(--accent)}
 .scan-table .neg{color:var(--red)}
 @media (max-width: 760px){

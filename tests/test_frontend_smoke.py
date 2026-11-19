@@ -253,6 +253,6 @@ def test_scans_page_breaks_down_gainers(server, browser):
     page.wait_for_timeout(200)
     assert sum(int(c.inner_text()) for c in page.query_selector_all(".scan-row .sg-n")) == n
     heads = [h.inner_text().strip().lower() for h in page.query_selector_all(".scan-table th")]
-    assert heads[1:] == ["stocks", "share of list", "of the group", "rs", "3m"]
+    assert heads[1:] == ["stocks", "share of list", "of the group", "rs", "3m", "group 1d", "group 1w"]
     assert errors == [], errors
     ctx.close()

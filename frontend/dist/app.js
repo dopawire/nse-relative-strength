@@ -1057,8 +1057,18 @@
     const hits = all.filter(m => m.m1 != null && m.m1 >= GAINER.minGain
       && m.tv != null && m.tv >= GAINER.minTurnoverCr && m.l != null && m.l >= GAINER.minPrice);
     const groupOf = m => (dim === 'cap' ? (m.cap || 'New') : m[dim]);
-    const total = new Map(), by = new Map();
-    for (const m of all) { const k = groupOf(m); if (k) total.set(k, (total.get(k) || 0) + 1); }
+    const total = new Map(), by = new Map(), members = new Map();
+    for (const m of all) {
+      const k = groupOf(m);
+      if (!k) continue;
+      total.set(k, (total.get(k) || 0) + 1);
+      if (!members.has(k)) members.set(k, []);
+      members.get(k).push(m);
+    }
+    // whole-group move (every stock in the group, not just the gainers):
+    // equal-weight average of the members' 1-day / 1-week changes
+    const mean = xs => { const v = xs.filter(x => x != null); return v.length ? v.reduce((a, x) => a + x, 0) / v.length : null; };
+    const chg = (v, dp) => v == null ? '—' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${v.toFixed(dp)}%</span>`;
     for (const m of hits) {
       const k = groupOf(m);
       if (!k) continue;
@@ -1090,13 +1100,17 @@
       const share = n ? c / n * 100 : 0;
       const rs = median(list.map(m => m.rr));
       const m3 = median(list.map(m => m.m3));
+      const grp = members.get(k) || [];
+      const g1d = mean(grp.map(m => m.d1)), g1w = mean(grp.map(m => m.w1));
       return `<tr class="scan-row${c ? '' : ' empty'}">
         <td class="sg-name"><span class="sw" style="background:${c ? color[k] : 'transparent'}"></span>${utils.esc(dim === 'cap' ? CAP_LABEL[k] : k)}</td>
         <td class="tnum sg-n">${c}</td>
         <td class="sg-share"><span class="bar"><span style="width:${share.toFixed(1)}%;background:${color[k]}"></span></span><span class="tnum">${c ? share.toFixed(0) + '%' : '—'}</span></td>
         <td class="tnum sg-of">${c} of ${tot} <span class="muted">(${pctOf(c, tot)})</span></td>
         <td class="tnum">${rs == null ? '—' : Math.round(rs)}</td>
-        <td class="tnum">${m3 == null ? '—' : `<span class="${m3 >= 0 ? 'pos' : 'neg'}">${m3 >= 0 ? '+' : ''}${m3.toFixed(0)}%</span>`}</td>
+        <td class="tnum">${chg(m3, 0)}</td>
+        <td class="tnum sg-grp">${chg(g1d, 2)}</td>
+        <td class="tnum">${chg(g1w, 2)}</td>
       </tr>`;
     }).join('');
     const asOf = ((state.meta && state.meta.drange) || '').split('→').pop().trim();   // window end
@@ -1113,8 +1127,10 @@
         <div class="scan-viz">${scanDonut(segs, n, nGroups, unit)}<div class="mtip scan-tip" id="scan-tip"></div></div>
         <div class="scan-table-wrap"><table class="scan-table">
           <thead><tr><th>${dim === 'cap' ? 'Size' : label}</th><th>Stocks</th><th>Share of list</th>
-            <th>Of the group</th><th title="median RS rating (1-99)">RS</th><th title="median 3-month return">3M</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" class="brd-empty">No 1-month gainers today.</td></tr>'}</tbody>
+            <th>Of the group</th><th title="median RS rating (1-99)">RS</th><th title="median 3-month return">3M</th>
+            <th class="sg-grp" title="whole group: average 1-day change of all its stocks (not just the gainers)">Group 1D</th>
+            <th title="whole group: average 1-week (5-session) change of all its stocks (not just the gainers)">Group 1W</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="8" class="brd-empty">No 1-month gainers today.</td></tr>'}</tbody>
         </table></div>
       </div>
     </div>`;
