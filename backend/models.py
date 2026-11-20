@@ -72,6 +72,7 @@ class BreadthResponse(BaseModel):
     span: str
     macros: list[MacroBreadth] = []
     divergence: dict = {}
+    market: dict = {}      # NIFTY 500 trend: close, ema flags, w1/m1/m3, off_high
 
 
 class RotationGroup(BaseModel):

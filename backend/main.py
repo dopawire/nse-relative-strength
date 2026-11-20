@@ -146,6 +146,7 @@ def get_breadth():
         "span": f"{dates[0]} → {dates[-1]}" if dates else "",
         "macros": brd.get("macros", []),
         "divergence": brd.get("divergence", {}),
+        "market": brd.get("market", {}),
     }
 
 

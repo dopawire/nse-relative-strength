@@ -224,3 +224,20 @@ def rs_ratings(series_by_sym, as_of):
     order = sorted(score, key=score.get)
     n = len(order)
     return {s: max(1, min(99, round(100 * (i + 1) / n))) for i, s in enumerate(order)}
+
+
+def index_trend(closes_by_date):
+    """Trend snapshot of an index ({date: close}) for the regime check:
+    close, EMA flags (EMA_PERIODS), 1W / 1M / 3M % returns and % below the
+    52-week closing high.  {} without data."""
+    if not closes_by_date:
+        return {}
+    flags, price = ema_flags(closes_by_date)
+    dates = sorted(closes_by_date)
+    hi = max(closes_by_date[d] for d in dates[-252:])
+    rnd = lambda v: round(v, 2) if v is not None else None   # noqa: E731
+    return {"close": round(price, 2), "date": dates[-1], "ema": flags,
+            "w1": rnd(period_return(closes_by_date, 5)),
+            "m1": rnd(period_return(closes_by_date, 20)),
+            "m3": rnd(period_return(closes_by_date, 63)),
+            "off_high": round((1 - price / hi) * 100, 2) if hi else None}

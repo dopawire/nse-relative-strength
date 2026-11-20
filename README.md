@@ -49,6 +49,18 @@ with:
   and domestic (DII) institutions since Jun 2014 as paired bars (1Y / 3Y /
   5Y / All), the running month marked "to <date>", with totals and a
   month-by-month table (net, combined, gross buy / sell).
+- **Focus** tab — the one-shot answer: which sectors and which market-cap
+  class to focus on next, with a one-liner each.  Sectors (≥ 5 stocks) are
+  ranked on 1M / 3M median return vs the average stock, share above the
+  50-day EMA, share of RS ≥ 80 leaders and RS_STS%, and tagged Leading /
+  Improving / Weakening / Lagging; plus "turning up" and "avoid" lists and
+  the market regime.
+- **Swing** tab — an evening swing-trading desk: market regime checklist
+  (NIFTY 500 vs its 20/50/200-day EMAs, breadth level and direction, share of
+  stocks above the 50-day EMA, FII flows) with exposure guidance, leading
+  industries, breakout candidates (RS ≥ 80 leaders in a full uptrend within
+  10% of the high, liquid, tradeable ADR, not extended), pullbacks in leaders,
+  extended stocks not to chase, and risk rules.
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method

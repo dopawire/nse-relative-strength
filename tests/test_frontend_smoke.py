@@ -283,3 +283,29 @@ def test_flows_page_draws_monthly_bars(server, browser):
         assert "FII net" in page.inner_text("#fl-tip")
     assert errors == [], errors
     ctx.close()
+
+
+@skip_browser
+def test_focus_and_swing_pages(server, browser):
+    """Focus gives one answer + sector / size verdicts; Swing shows the regime
+    checklist and the setup tables — both deep-linkable, no JS errors."""
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server + "/#/focus", wait_until="networkidle", timeout=30000)
+    page.wait_for_selector(".dc-answer")
+    assert page.inner_text(".dc-answer-t").startswith("Focus on ")
+    assert "Market:" in page.inner_text(".dc-answer-s")
+    caps = [r.inner_text() for r in page.query_selector_all(".dc-grid section:nth-child(2) .dc-row-h b")]
+    assert set(caps) <= {"Large cap", "Mid cap", "Small cap", "Micro cap"} and caps
+    page.goto(server + "/#/swing", wait_until="networkidle", timeout=30000)
+    page.wait_for_selector(".dc-checks")
+    assert len(page.query_selector_all(".dc-checks li")) == 7
+    assert page.inner_text(".scan-title") == "Swing-trading desk"
+    rows = page.query_selector_all(".dc-tr")
+    if rows:                                   # click opens the stock RS chart
+        rows[0].click()
+        page.wait_for_selector("#stock-modal.open", timeout=5000)
+    assert errors == [], errors
+    ctx.close()

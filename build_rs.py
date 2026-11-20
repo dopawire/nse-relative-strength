@@ -53,7 +53,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               standard_company)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
-                             equal_weight_rs, period_return, avg_turnover_cr,
+                             equal_weight_rs, period_return, avg_turnover_cr, index_trend,
                              rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -1080,7 +1080,8 @@ def main():
         macros = compute_macro_breadth(universe, cache, breadth_dates)
         breadth = {"dates": bdates, "osc": bosc, "n": bn, "macros": macros,
                    "divergence": detect_breadth_divergence(
-                       cache.get("__BENCH__", {}), bdates, bosc)}
+                       cache.get("__BENCH__", {}), bdates, bosc),
+                   "market": index_trend(cache.get("__BENCH__", {}))}
         if bosc:
             print(f"Breadth oscillator: {len(bosc)} days "
                   f"({bdates[0]} → {bdates[-1]}), latest {bosc[-1]:+.1f} "

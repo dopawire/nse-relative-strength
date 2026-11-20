@@ -223,3 +223,14 @@ def test_ipo_watch_performance_since_listing():
     assert up["base"] == 100.0 and up["ret"] == 21.0 and up["bret"] == 10.0
     assert up["xret"] == 10.0                     # 1.21 / 1.10 − 1
     assert "xret" not in ipo["ONE"]
+
+
+def test_index_trend():
+    from rs_engine.maths import index_trend
+    assert index_trend({}) == {}
+    import datetime as dt
+    d0 = dt.date(2025, 1, 1)
+    closes = {(d0 + dt.timedelta(days=i)).isoformat(): 100 + i for i in range(300)}
+    t = index_trend(closes)
+    assert t["ema"] == [1, 1, 1, 1, 1] and t["off_high"] == 0
+    assert t["m1"] > 0 and t["w1"] > 0 and t["date"] == max(closes)

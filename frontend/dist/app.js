@@ -81,6 +81,7 @@
       span: b.dates.length ? `${b.dates[0]} → ${b.dates[b.dates.length - 1]}` : '',
       macros: b.macros || [],
       divergence: b.divergence || {},
+      market: b.market || {},
     };
   }
 
@@ -224,8 +225,8 @@
     state.activeTab = tab;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
     // Toolbars: level tables get search + filters; New Listings gets search only
-    const isLevel = !['breadth', 'rotation', 'ipo', 'scans', 'flows'].includes(tab);
-    $.toolbarSection.style.display = ['breadth', 'rotation', 'scans', 'flows'].includes(tab) ? 'none' : '';
+    const isLevel = !['breadth', 'rotation', 'ipo', 'scans', 'flows', 'focus', 'swing'].includes(tab);
+    $.toolbarSection.style.display = ['breadth', 'rotation', 'scans', 'flows', 'focus', 'swing'].includes(tab) ? 'none' : '';
     $.toolbarSection.classList.toggle('search-only', tab === 'ipo');
     $.note.style.display = isLevel ? '' : 'none';
     renderTab(tab);
@@ -262,6 +263,14 @@
       renderFlows();
       return;
     }
+    if (tab === 'focus') {
+      await renderFocus();
+      return;
+    }
+    if (tab === 'swing') {
+      await renderSwing();
+      return;
+    }
 
     // Fetch level data if not cached
     if (!state.levelData[tab]) {
@@ -295,6 +304,10 @@
       if (state.levelData.macro && state.levelData.macro.groups) drawScans();
     } else if (state.activeTab === 'flows') {
       renderFlows();
+    } else if (state.activeTab === 'focus') {
+      renderFocus();
+    } else if (state.activeTab === 'swing') {
+      renderSwing();
     } else if (state.activeTab === 'ipo') {
       renderIpo();
     } else if (state.levelData[state.activeTab]) {
@@ -995,6 +1008,325 @@
 
 
   // =========================================================================
+  // FOCUS + SWING: decision pages built from the data the other tabs show
+  // =========================================================================
+  // One record per stock with its macro / sector / industry / basic names.
+  function stockIndex() {
+    const stocks = new Map();
+    for (const g of state.levelData.macro.groups) {
+      for (const m of g.members) stocks.set(m.s, { ...m, macro: g.name });
+    }
+    for (const key of ['sector', 'industry', 'basic']) {
+      for (const g of (state.levelData[key] && state.levelData[key].groups) || []) {
+        for (const m of g.members) { const st = stocks.get(m.s); if (st) st[key] = g.name; }
+      }
+    }
+    return [...stocks.values()];
+  }
+
+  async function loadDecisionData() {
+    for (const lv of state.levels) {
+      if (!state.levelData[lv.key] || state.levelData[lv.key]._error) {
+        state.levelData[lv.key] = await api.level(lv.key);
+      }
+    }
+    if (!state.breadthData) state.breadthData = await api.breadth();
+    if (!state.flowsData) {
+      try { state.flowsData = await api.flows(); } catch (e) { state.flowsData = { months: [] }; }
+    }
+  }
+
+  // EMA flags follow EMA_PERIODS = [20, 50, 100, 150, 200]: 1 above, 0 below, -1 n/a
+  const EMA_I = { 20: 0, 50: 1, 100: 2, 150: 3, 200: 4 };
+  const aboveEma = (m, p) => m.e && m.e[EMA_I[p]] === 1;
+  const hasEma = (m, p) => m.e && m.e[EMA_I[p]] !== -1;
+  const sharePct = (list, f) => list.length ? list.filter(f).length / list.length * 100 : null;
+  const sgn = (v, dp = 1) => v == null ? '—' : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(dp)}%`;
+  const tone = (v, dp = 1) => v == null ? '—' : `<span class="${v >= 0 ? 'pos' : 'neg'}">${sgn(v, dp)}</span>`;
+
+  // Group health from its stocks (medians: one wild stock can't carry a group).
+  // rel1 / rel3 = vs the median of ALL stocks, so the quadrant says whether the
+  // group beats the average stock — the same equal-weight view as the RS tabs.
+  function groupStats(list, base) {
+    const e50 = list.filter(m => hasEma(m, 50)), e200 = list.filter(m => hasEma(m, 200));
+    const m1 = median(list.map(m => m.m1)), m3 = median(list.map(m => m.m3));
+    const r = {
+      n: list.length, m1, m3, w1: median(list.map(m => m.w1)),
+      p50: sharePct(e50, m => aboveEma(m, 50)), p200: sharePct(e200, m => aboveEma(m, 200)),
+      lead: list.filter(m => (m.rr || 0) >= 80).length,
+      leadPct: sharePct(list, m => (m.rr || 0) >= 80),
+      nearHi: sharePct(list, m => m.h != null && m.h <= 10),
+      rr: median(list.map(m => m.rr)),
+    };
+    if (base) {
+      r.rel1 = m1 == null || base.m1 == null ? null : m1 - base.m1;
+      r.rel3 = m3 == null || base.m3 == null ? null : m3 - base.m3;
+      r.quad = r.rel1 == null || r.rel3 == null ? 'Lagging'
+        : r.rel3 >= 0 ? (r.rel1 >= 0 ? 'Leading' : 'Weakening') : (r.rel1 >= 0 ? 'Improving' : 'Lagging');
+    }
+    return r;
+  }
+
+  // Weighted percentile-rank score (0-100) across the rows; missing values skip
+  function rankScore(rows, specs) {
+    rows.forEach(r => { r.score = 0; r._w = 0; });
+    for (const [k, w] of specs) {
+      const v = rows.filter(r => r[k] != null).sort((a, b) => a[k] - b[k]);
+      if (v.length < 2) continue;
+      v.forEach((r, i) => { r.score += w * i / (v.length - 1); r._w += w; });
+    }
+    rows.forEach(r => { r.score = r._w ? r.score / r._w * 100 : 0; delete r._w; });
+    return rows.sort((a, b) => b.score - a.score);
+  }
+  const GROUP_SPECS = [['rel1', 0.30], ['rel3', 0.20], ['p50', 0.20], ['leadPct', 0.15], ['pct', 0.15]];
+  const CAP_SPECS = [['rel1', 0.35], ['rel3', 0.20], ['p50', 0.25], ['leadPct', 0.10], ['nearHi', 0.10]];
+
+  function groupRows(stocks, key, minN, base) {
+    const by = new Map();
+    for (const m of stocks) {
+      const k = m[key];
+      if (!k || m.nw) continue;                       // new listings: too little history
+      if (!by.has(k)) by.set(k, []);
+      by.get(k).push(m);
+    }
+    const lvl = state.levelData[key];
+    const info = new Map(((lvl && lvl.groups) || []).map(g => [g.name, g]));
+    const rows = [];
+    for (const [name, list] of by) {
+      if (list.length < minN) continue;
+      const g = info.get(name) || {};
+      rows.push({ name, list, pct: g.pct != null ? g.pct * 100 : null, ...groupStats(list, base) });
+    }
+    return rankScore(rows, key === 'cap' ? CAP_SPECS : GROUP_SPECS);
+  }
+
+  // Market regime: index trend + breadth + participation + flows, as a checklist
+  function marketRegime(stocks) {
+    const b = state.breadthData || {}, mk = b.market || {}, osc = b.osc || [];
+    const e = mk.ema || [];
+    const flag = i => (e[i] === 1 ? true : e[i] === 0 ? false : null);
+    const o = osc.length ? osc[osc.length - 1] : null, o5 = osc.length > 5 ? osc[osc.length - 6] : null;
+    const e50 = stocks.filter(m => hasEma(m, 50));
+    const p50 = sharePct(e50, m => aboveEma(m, 50));
+    const fl = (state.flowsData && state.flowsData.months) || [];
+    const cur = fl.length ? fl[fl.length - 1] : null;
+    const checks = [
+      { t: 'NIFTY 500 above its 20-day EMA', ok: flag(0), v: mk.w1 != null ? `1W ${sgn(mk.w1)}` : '' },
+      { t: 'NIFTY 500 above its 50-day EMA', ok: flag(1), v: mk.m1 != null ? `1M ${sgn(mk.m1)}` : '' },
+      { t: 'NIFTY 500 above its 200-day EMA', ok: flag(4), v: mk.off_high != null ? `${mk.off_high.toFixed(1)}% off its high` : '' },
+      { t: 'Breadth oscillator above zero', ok: o == null ? null : o > 0, v: o == null ? '' : o.toFixed(1) },
+      { t: 'Breadth rising over the last week', ok: o == null || o5 == null ? null : o > o5, v: o5 == null ? '' : `${o5.toFixed(1)} → ${o.toFixed(1)}` },
+      { t: 'Half the stocks above their 50-day EMA', ok: p50 == null ? null : p50 >= 50, v: p50 == null ? '' : `${p50.toFixed(0)}%` },
+      { t: 'FIIs net buyers this month', ok: cur ? cur.fii > 0 : null, v: cur ? crore(cur.fii) : '' },
+    ];
+    const known = checks.filter(c => c.ok !== null), pass = known.filter(c => c.ok).length;
+    const frac = known.length ? pass / known.length : 0;
+    const level = frac >= 0.8 ? 'on' : frac >= 0.5 ? 'mixed' : 'off';
+    return { checks, pass, known: known.length, level, mk, p50, osc: o };
+  }
+  const REGIME = {
+    on: { word: 'Risk-on', line: 'trend and breadth agree — normal size, act on breakouts in the leading groups.',
+      size: 'Exposure 75–100% · risk ~1% of capital per trade · 4–6 positions' },
+    mixed: { word: 'Mixed', line: 'signals disagree — be selective: half size, only the best setups in leading groups, book profits sooner.',
+      size: 'Exposure 25–50% · risk ~0.5% per trade · 2–3 positions' },
+    off: { word: 'Risk-off', line: 'trend and breadth are weak — protect capital: mostly cash, small pilot positions only.',
+      size: 'Exposure 0–20% · risk ≤0.5% per trade · pilots only' },
+  };
+
+  const asOfText = () => {
+    const d = ((state.meta && state.meta.drange) || '').split('→').pop().trim();
+    if (!/^\d{4}-\d\d-\d\d$/.test(d)) return '';
+    const [y, m, dd] = d.split('-');
+    return `${+dd} ${MON[+m - 1]} ${y}`;
+  };
+  const stockLink = m => `<button type="button" class="dc-stk" data-sym="${utils.esc(m.s)}" title="${utils.esc(m.n)}">${utils.esc(m.s)}</button>`;
+  const bindStockLinks = () => $.content.querySelectorAll('[data-sym]').forEach(el =>
+    el.addEventListener('click', () => openStockModal(el.dataset.sym)));
+  const decisionError = e => {
+    $.content.innerHTML = `<div class="brd-empty">Failed to load data: ${utils.esc(e.message)}</div>`;
+  };
+
+  function analyse() {
+    const stocks = stockIndex();
+    const base = groupStats(stocks.filter(m => !m.nw));
+    const sectors = groupRows(stocks, 'sector', 5, base);
+    const industries = groupRows(stocks, 'industry', 4, base);
+    const caps = groupRows(stocks.map(m => ({ ...m, cap: m.cap === 'New' ? null : m.cap })), 'cap', 1, base);
+    // each industry's sector = the sector most of its stocks belong to
+    for (const r of industries) {
+      const cnt = {};
+      r.list.forEach(m => { if (m.sector) cnt[m.sector] = (cnt[m.sector] || 0) + 1; });
+      r.sector = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || '';
+    }
+    return { stocks, base, sectors, industries, caps, reg: marketRegime(stocks) };
+  }
+
+  // ---- FOCUS: one answer + one-liners --------------------------------------
+  async function renderFocus() {
+    try { await loadDecisionData(); } catch (e) { return decisionError(e); }
+    const A = analyse();
+    const { sectors, industries, caps, reg, base } = A;
+    if (!sectors.length) {
+      $.content.innerHTML = '<div class="brd-empty">Not enough data to rank sectors yet.</div>';
+      return;
+    }
+    const strong = sectors.filter(r => r.quad === 'Leading' || r.quad === 'Improving');
+    const focus = (strong.length ? strong : sectors).slice(0, 3);
+    const turning = sectors.filter(r => r.quad === 'Improving' && !focus.includes(r) && r.rel1 >= 1)
+      .sort((a, b) => b.rel1 - a.rel1).slice(0, 2);
+    const avoid = sectors.slice().reverse().filter(r => r.quad === 'Lagging' || r.quad === 'Weakening').slice(0, 3);
+    const capTop = caps[0];
+    const R = REGIME[reg.level];
+    const leaders = r => r.list.filter(m => (m.rr || 0) >= 80 && aboveEma(m, 50)
+        && m.tv != null && m.tv >= SWING.minTurnoverCr)
+      .sort((a, b) => b.rr - a.rr).slice(0, 4);
+    const topInd = r => industries.filter(i => i.sector === r.name).slice(0, 2).map(i => i.name);
+    const capName = k => CAP_LABEL[k] || k;
+    const line = r => `median stock ${sgn(r.m1)} in 1M and ${sgn(r.m3)} in 3M (all stocks ${sgn(base.m1)} / ${sgn(base.m3)}) · `
+      + `${r.p50 == null ? '—' : r.p50.toFixed(0) + '%'} above the 50-day EMA · ${r.lead} leader${r.lead === 1 ? '' : 's'} (RS ≥ 80)`;
+    const QUAD_TIP = {
+      Leading: 'beating the average stock over 1M and 3M',
+      Improving: 'behind over 3M but beating the average stock over 1M — turning up',
+      Weakening: 'ahead over 3M but lagging over 1M — losing steam',
+      Lagging: 'behind the average stock over 1M and 3M',
+    };
+    const quad = r => `<span class="dc-q q-${r.quad.toLowerCase()}" title="${QUAD_TIP[r.quad]}">${r.quad}</span>`;
+    const secRow = (r, extra) => `<div class="dc-row">
+        <div class="dc-row-h"><b>${utils.esc(r.name)}</b>${quad(r)}<span class="dc-score" title="composite score vs other sectors (0-100)">${r.score.toFixed(0)}</span></div>
+        <div class="dc-line">${line(r)}</div>${extra || ''}</div>`;
+    const focusRows = focus.map(r => {
+      const ind = topInd(r), ld = leaders(r);
+      return secRow(r, `<div class="dc-sub">${ind.length ? `Strongest industries: ${ind.map(utils.esc).join(', ')}` : ''}${ld.length ? `${ind.length ? ' · ' : ''}Leaders: ${ld.map(stockLink).join(' ')}` : ''}</div>`);
+    }).join('');
+    const capRows = caps.map((r, i) => `<div class="dc-row">
+        <div class="dc-row-h"><b>${capName(r.name)}</b><span class="dc-q ${i === 0 ? 'q-leading' : i === 1 ? 'q-improving' : 'q-lagging'}">${i === 0 ? 'Focus' : i === 1 ? 'Next best' : 'Lighter'}</span><span class="dc-score">${r.score.toFixed(0)}</span></div>
+        <div class="dc-line">median ${sgn(r.w1)} 1W · ${sgn(r.m1)} 1M · ${sgn(r.m3)} 3M · ${r.p50 == null ? '—' : r.p50.toFixed(0) + '%'} above 50-EMA · ${r.nearHi == null ? '—' : r.nearHi.toFixed(0) + '%'} within 10% of a 52-week high</div></div>`).join('');
+    const names = focus.map(r => `<b>${utils.esc(r.name)}</b>`);
+    const answer = `Focus on ${names.length > 1 ? names.slice(0, -1).join(', ') + (names.length > 2 ? ', and ' : ' and ') + names[names.length - 1] : names[0]}`
+      + (capTop ? `, in <b>${capName(capTop.name).toLowerCase()}s</b>` : '');
+    $.content.innerHTML = `<div class="scan-card dc">
+      <div class="scan-head"><div><div class="scan-title">Where to focus next</div>
+        <div class="scan-sub">one answer from RS, momentum, participation and breadth · as of ${asOfText()}</div></div></div>
+      <div class="dc-body">
+        <div class="dc-answer"><span class="dc-dot r-${reg.level}"></span><div>
+          <div class="dc-answer-t">${answer}.</div>
+          <div class="dc-answer-s">Market: <b class="r-${reg.level}-t">${R.word}</b> (${reg.pass} of ${reg.known} checks) — ${R.line}</div></div></div>
+        <ul class="dc-bullets">
+          <li><b>Sectors:</b> ${focus.map(r => `${utils.esc(r.name)} (${r.quad.toLowerCase()})`).join(', ')} lead on combined strength.</li>
+          ${turning.length ? `<li><b>Turning up:</b> ${turning.map(r => `${utils.esc(r.name)} (${sgn(r.rel1)} vs the average stock in 1M)`).join(', ')} — early, watch for follow-through.</li>` : ''}
+          ${capTop ? `<li><b>Size:</b> ${capName(capTop.name)} is strongest — median ${sgn(capTop.m1)} in 1M, ${capTop.p50 == null ? '—' : capTop.p50.toFixed(0) + '%'} above the 50-day EMA.</li>` : ''}
+          ${avoid.length ? `<li><b>Avoid for now:</b> ${avoid.map(r => utils.esc(r.name)).join(', ')}.</li>` : ''}
+        </ul>
+        <div class="dc-grid">
+          <section><h3>Sectors to focus</h3>${focusRows}</section>
+          <section><h3>Market cap</h3>${capRows}</section>
+          ${turning.length ? `<section><h3>Turning up — watch next</h3>${turning.map(r => secRow(r)).join('')}</section>` : ''}
+          ${avoid.length ? `<section><h3>Avoid for now</h3>${avoid.map(r => secRow(r)).join('')}</section>` : ''}
+        </div>
+        <div class="dc-foot">How it's decided: sectors with ≥ 5 stocks are ranked on 1M (30%) and 3M (20%) median return vs the average stock,
+          share above the 50-day EMA (20%), share of RS ≥ 80 leaders (15%) and the group's RS_STS% (15%).
+          Leading / Improving / Weakening / Lagging compare 3M and 1M with the average stock. Size classes are ranked the same way.
+          Not investment advice.</div>
+      </div></div>`;
+    bindStockLinks();
+  }
+
+  // ---- SWING: what I'd check every evening ----------------------------------
+  // Breakout candidates: leaders in a full uptrend near their highs, liquid,
+  // with enough daily range to pay for the risk — and not already extended.
+  const SWING = { minRS: 80, maxOffHigh: 10, minAdr: 2, maxAdr: 8, minTurnoverCr: 5, minPrice: 50,
+    maxWeek: 15, maxMonth: 50, pbMinRS: 75, pbOffHigh: [5, 25] };
+
+  async function renderSwing() {
+    try { await loadDecisionData(); } catch (e) { return decisionError(e); }
+    const A = analyse();
+    const { stocks, sectors, industries, reg } = A;
+    const R = REGIME[reg.level];
+    const leadInd = industries.filter(r => r.quad === 'Leading' || r.quad === 'Improving').slice(0, 8);
+    const hotInd = new Set(leadInd.map(r => r.name));
+    const hotSec = new Set(sectors.filter(r => r.quad === 'Leading' || r.quad === 'Improving').slice(0, 3).map(r => r.name));
+    const liquid = m => m.tv != null && m.tv >= SWING.minTurnoverCr && m.l != null && m.l >= SWING.minPrice;
+    const tradableRange = m => m.a != null && m.a >= SWING.minAdr && m.a <= SWING.maxAdr;
+    const fullTrend = m => [20, 50, 100, 150, 200].every(p => aboveEma(m, p));
+    const inLead = m => hotInd.has(m.industry) || hotSec.has(m.sector);
+    const breakouts = stocks.filter(m => !m.nw && (m.rr || 0) >= SWING.minRS && fullTrend(m) && m.b === 1
+        && m.h != null && m.h <= SWING.maxOffHigh && tradableRange(m) && liquid(m) && (m.w1 == null || m.w1 <= SWING.maxWeek)
+        && (m.m1 == null || m.m1 <= SWING.maxMonth))
+      .map(m => ({ ...m, k: m.rr + (inLead(m) ? 10 : 0) - 1.5 * m.h }))
+      .sort((a, b) => b.k - a.k);
+    const pullbacks = stocks.filter(m => !m.nw && (m.rr || 0) >= SWING.pbMinRS && aboveEma(m, 50) && aboveEma(m, 200)
+        && hasEma(m, 20) && !aboveEma(m, 20) && m.h != null && m.h >= SWING.pbOffHigh[0] && m.h <= SWING.pbOffHigh[1]
+        && tradableRange(m) && liquid(m))
+      .map(m => ({ ...m, k: m.rr + (inLead(m) ? 10 : 0) - 0.5 * m.h }))
+      .sort((a, b) => b.k - a.k);
+    const extended = stocks.filter(m => !m.nw && (m.rr || 0) >= SWING.minRS && liquid(m)
+        && ((m.w1 != null && m.w1 > 20) || (m.m1 != null && m.m1 > SWING.maxMonth)))
+      .sort((a, b) => (b.w1 || 0) - (a.w1 || 0));
+
+    const table = (list, max, empty) => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
+      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Size</th><th>Price</th>
+        <th title="RS rating 1-99 vs all stocks">RS</th><th>1W</th><th>1M</th>
+        <th title="% below the 52-week high">Off high</th><th title="average daily range, 20 days — size the stop with it">ADR</th>
+        <th title="average daily traded value, 20 sessions">₹ cr/day</th></tr></thead>
+      <tbody>${list.slice(0, max).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
+        <td class="tnum">${i + 1}</td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}</span></td>
+        <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
+        <td>${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}</td>
+        <td class="tnum">${utils.fmtPrice(m.l)}</td>
+        <td class="tnum"><b>${m.rr ?? '—'}</b></td>
+        <td class="tnum">${tone(m.w1)}</td><td class="tnum">${tone(m.m1)}</td>
+        <td class="tnum">${m.h == null ? '—' : m.h.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="dc-empty">${empty}</div>`;
+
+    const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
+        <span class="dc-ck">${c.ok === null ? '–' : c.ok ? '✓' : '✗'}</span>${c.t}<span class="dc-cv">${c.v}</span></li>`).join('');
+    const indRows = leadInd.map(r => `<div class="dc-ind-row"><b>${utils.esc(r.name)}</b>
+        <span class="dc-muted">${utils.esc(r.sector)}</span>${`<span class="dc-q q-${r.quad.toLowerCase()}">${r.quad}</span>`}
+        <span class="dc-line">${sgn(r.m1)} 1M · ${r.p50 == null ? '—' : r.p50.toFixed(0) + '%'} > 50-EMA · ${r.lead} leaders</span></div>`).join('');
+    const ext = extended.slice(0, 12).map(m => `${stockLink(m)} <span class="dc-muted">${sgn(m.w1, 0)} 1W</span>`).join(' · ');
+
+    $.content.innerHTML = `<div class="scan-card dc">
+      <div class="scan-head"><div><div class="scan-title">Swing-trading desk</div>
+        <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div></div>
+      <div class="dc-body">
+        <div class="dc-answer"><span class="dc-dot r-${reg.level}"></span><div>
+          <div class="dc-answer-t">Market: <b class="r-${reg.level}-t">${R.word}</b> — ${reg.pass} of ${reg.known} checks pass.</div>
+          <div class="dc-answer-s">${R.size}. ${R.line.charAt(0).toUpperCase() + R.line.slice(1)}</div></div></div>
+        <div class="dc-grid">
+          <section><h3>1 · Market regime checklist</h3><ul class="dc-checks">${checks}</ul></section>
+          <section><h3>2 · Leading industries — where setups work best</h3>${indRows || '<div class="dc-empty">No industry is beating the average stock right now.</div>'}</section>
+        </div>
+        <section class="dc-wide"><h3>3 · Breakout watch — leaders near their highs <span class="dc-muted">${breakouts.length} stocks</span></h3>
+          <div class="dc-note">RS ≥ ${SWING.minRS}, above the 20/50/100/150/200-day EMAs, RS line above its 21-EMA, within ${SWING.maxOffHigh}% of the 52-week high,
+            ADR ${SWING.minAdr}–${SWING.maxAdr}%, ≥ ₹${SWING.minTurnoverCr} cr/day, not up > ${SWING.maxWeek}% this week. ● = in a leading group (ranked first).
+            Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).</div>
+          ${table(breakouts, 25, 'No stock passes the breakout filter today — that itself says: stay patient.')}</section>
+        <section class="dc-wide"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>
+          <div class="dc-note">RS ≥ ${SWING.pbMinRS}, above the 50 and 200-day EMAs but back below the 20-day, ${SWING.pbOffHigh[0]}–${SWING.pbOffHigh[1]}% off the high.
+            Enter when it turns back up (reclaims the prior day's high / the 20-EMA); stop under the pullback low.</div>
+          ${table(pullbacks, 15, 'No leader is pulling back in an orderly way right now.')}</section>
+        ${extended.length ? `<section class="dc-wide"><h3>5 · Don't chase — extended leaders</h3>
+          <div class="dc-note">Up > 20% in a week or > 50% in a month: wait for a base or a pullback.</div>
+          <div class="dc-chips">${ext}</div></section>` : ''}
+        <section class="dc-wide"><h3>${extended.length ? 6 : 5} · Rules I'd trade by</h3>
+          <ul class="dc-rules">
+            <li><b>Regime first:</b> size follows the checklist above — cut size when it turns Mixed, mostly cash when Risk-off.</li>
+            <li><b>Risk per trade:</b> decide the stop before entry; lose at most 0.5–1% of capital if it hits. Shares = risk ₹ ÷ (entry − stop).</li>
+            <li><b>Stop:</b> below the setup's low, usually ≤ 1× ADR from entry; never widen it.</li>
+            <li><b>Profits:</b> sell a third to half at 2–3× risk or after 3–5 strong days; move the stop to breakeven; trail the rest with the 10/20-day EMA.</li>
+            <li><b>Leaders only:</b> RS ≥ 80 stocks in leading groups; skip stocks reporting results within the holding period.</li>
+            <li><b>Review:</b> if 3–4 breakouts in a row fail, the market is telling you to step back.</li>
+          </ul></section>
+        <div class="dc-foot">Screens use the latest close; levels are a starting point for your own chart review, not investment advice.
+          Click a stock for its RS chart.</div>
+      </div></div>`;
+    bindStockLinks();
+  }
+
+  // =========================================================================
   // FII / DII: monthly net cash-market flows (NSE provisional, ₹ crore)
   // =========================================================================
   const FLOW_RANGES = { '1Y': 12, '3Y': 36, '5Y': 60, 'All': 0 };
@@ -1194,17 +1526,7 @@
 
   function drawScans() {
     const dim = state.scan.dim;
-    // one record per stock: the macro level lists every stock once
-    const stocks = new Map();
-    for (const g of state.levelData.macro.groups) {
-      for (const m of g.members) stocks.set(m.s, { ...m });
-    }
-    for (const key of ['sector', 'basic']) {
-      for (const g of (state.levelData[key] && state.levelData[key].groups) || []) {
-        for (const m of g.members) { const st = stocks.get(m.s); if (st) st[key] = g.name; }
-      }
-    }
-    const all = [...stocks.values()];
+    const all = stockIndex();
     const hits = all.filter(m => m.m1 != null && m.m1 >= GAINER.minGain
       && m.tv != null && m.tv >= GAINER.minTurnoverCr && m.l != null && m.l >= GAINER.minPrice);
     const groupOf = m => (dim === 'cap' ? (m.cap || 'New') : m[dim]);
@@ -1982,6 +2304,8 @@
     tabHTML += '<button class="tab" data-tab="ipo">New Listings</button>';
     tabHTML += '<button class="tab" data-tab="scans">Scans</button>';
     tabHTML += '<button class="tab" data-tab="flows">FII / DII</button>';
+    tabHTML += '<button class="tab" data-tab="focus">Focus</button>';
+    tabHTML += '<button class="tab" data-tab="swing">Swing</button>';
     $.tabBar.innerHTML = tabHTML;
 
     // Tab click handlers
@@ -2013,7 +2337,7 @@
     // Route to the correct tab from URL hash
     const initialTab = getHashTab();
     // Validate against known levels
-    const validTabs = state.levels.map(l => l.key).concat(['breadth', 'rotation', 'ipo', 'scans', 'flows']);
+    const validTabs = state.levels.map(l => l.key).concat(['breadth', 'rotation', 'ipo', 'scans', 'flows', 'focus', 'swing']);
     const tab = validTabs.includes(initialTab) ? initialTab : 'macro';
     if (tab !== initialTab) setHashTab(tab);
     else activateTab(tab);
