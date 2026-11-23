@@ -308,11 +308,14 @@ def is_illiquid(closes, volumes, window, max_turnover_cr=ILLIQUID_TURNOVER_CR):
     return tv is None or tv < max_turnover_cr
 
 
-def ipo_metrics(closes, ipo, calendar, bench=None, max_age=252):
+def ipo_metrics(closes, ipo, calendar, bench=None, max_age=252, raw_first=None):
     """A mainboard IPO listed in the last `max_age` market sessions:
     {"d": listing day, "p": issue price, "n": sessions since listing
     (1 = the listing day), "g": % vs the issue price, "x": % out-/under-
-    performance vs NIFTY 500 since the listing-day close}.  None for older
+    performance vs NIFTY 500 since the listing-day close}.  `raw_first` =
+    NSE's unadjusted listing-day close: a split / bonus since listing scales
+    the issue price like the price history (CORDELIA's 10:1 split would
+    otherwise read −89% vs issue).  None for older
     listings, or when the cached history starts well before the listing
     day (a renamed / relisted symbol, not this IPO)."""
     if not ipo or not closes or not calendar:
@@ -328,6 +331,8 @@ def ipo_metrics(closes, ipo, calendar, bench=None, max_age=252):
     if len([d for d in calendar if listed <= d < first]) > 5:
         return None
     last = closes[max(closes)]
+    if price and raw_first and closes[first]:
+        price = round(price * closes[first] / raw_first, 2)
     x = None
     if bench and bench.get(first) and bench.get(max(closes)) and closes[first]:
         x = round(((last / closes[first]) / (bench[max(closes)] / bench[first]) - 1) * 100, 1)

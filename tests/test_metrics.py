@@ -201,3 +201,16 @@ def test_backfill_record_ipo_and_illiquid():
     thin = {d: 100 for d in c}
     thin[ds[-5]] = 0
     assert bp.Stock(u, c, hl, ll, thin, bench).record(ds[k], ds[k - 25], "New", ds, k) is None
+
+
+def test_ipo_metrics_adjusts_issue_price_for_a_split():
+    """CORDELIA: issue ₹808, listed at 668.1, 10:1 split later — the cache is
+    adjusted (listing close 66.81), so the issue price must be too."""
+    cal = days(40)
+    c = {d: 66.81 for d in cal[-30:]}
+    c[cal[-1]] = 84.56
+    m = maths.ipo_metrics(c, {"listed": cal[-30], "price": 808.0}, cal, raw_first=668.1)
+    assert m["p"] == pytest.approx(80.8)
+    assert m["g"] == pytest.approx((84.56 / 80.8 - 1) * 100, abs=0.05)      # +4.7%, not −89.5%
+    no_ca = maths.ipo_metrics(c, {"listed": cal[-30], "price": 808.0}, cal, raw_first=66.81)
+    assert no_ca["p"] == 808.0

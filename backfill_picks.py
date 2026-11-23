@@ -45,9 +45,10 @@ def _emas(vals, period):
 class Stock:
     """One stock's history, pre-indexed so any as-of date is a lookup."""
 
-    def __init__(self, u, ser, hi, lo, vol, bench, ipo=None):
+    def __init__(self, u, ser, hi, lo, vol, bench, ipo=None, raw_first=None):
         self.u = u
         self.ipo = ipo
+        self.raw_first = raw_first
         self.ds = sorted(ser)
         self.c = [ser[d] for d in self.ds]
         self.hi, self.lo, self.vol = hi, lo, vol
@@ -149,7 +150,7 @@ class Stock:
         ipo = None
         if self.ipo and cal is not None:
             ipo = ipo_metrics(dict(zip(self.ds[:i + 1], self.c[:i + 1])), self.ipo,
-                              cal[:k + 1], self.bench)
+                              cal[:k + 1], self.bench, raw_first=self.raw_first)
         return {"s": self.u["sym"], "n": self.u["name"], "sector": self.u["sector"],
                 "industry": self.u["industry"], "cap": cap,
                 "e": e, "b": rse, "h": h, "a": a, "l": price, "nw": nw,
@@ -182,7 +183,8 @@ def iter_days(sessions):
     ipo_list = B.read_ipos()
 
     stocks = [Stock(u, cache[u["sym"]], highs.get(u["sym"], {}), lows.get(u["sym"], {}),
-                    vols.get(u["sym"], {}), bench, ipo_list.get(u["sym"]))
+                    vols.get(u["sym"], {}), bench, ipo_list.get(u["sym"]),
+                    nse_archive.raw_close(arc, u["sym"], min(cache[u["sym"]])))
               for u in universe if cache.get(u["sym"])]
     bdates = sorted(bench)
     for day in bdates[-sessions:]:

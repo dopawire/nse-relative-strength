@@ -1167,7 +1167,8 @@ def main():
                       "rr": ratings.get(sym),
                       "cap": cap_class(sym, caps, len(ser)),
                       "ev": upcoming.get(sym),
-                      "ipo": ipo_metrics(ser, ipo_list.get(sym), cal, bench),
+                      "ipo": ipo_metrics(ser, ipo_list.get(sym), cal, bench,
+                                         raw_first=nse_archive.raw_close(arc, sym, min(ser))),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
                                       volumes.get(sym, {}), since=brk),
                       **nse_archive.delivery_metrics(arc.get(sym), ref_dates[-1])}

@@ -1263,7 +1263,7 @@
     const tagCell = m => ((D.tags || {})[m.s] || []).map(t => `<span class="dc-tag t-${t}" title="${TAG_TIP[t]}">${TAG_WORD[t]}</span>`).join('');
     const ipoTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
       <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th title="listing day · market sessions since">Listed</th>
-        <th title="IPO issue price">Issue</th><th>Price</th><th title="% above the issue price">vs issue</th>
+        <th title="IPO issue price, adjusted for any later split / bonus">Issue</th><th>Price</th><th title="% above the issue price">vs issue</th>
         <th title="out-/under-performance vs NIFTY 500 since the listing-day close">vs N500</th><th>1W</th>
         <th title="% below the highest intraday price since listing">Off high</th><th title="average daily range, 20 days">ADR</th>
         <th title="average daily traded value, 20 sessions">₹ cr/day</th>

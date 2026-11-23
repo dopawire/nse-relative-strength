@@ -225,6 +225,12 @@ def rebase(cache, highs, lows, arc, syms, volumes=None, sessions=None):
     return out
 
 
+def raw_close(arc, sym, day):
+    """NSE's unadjusted close for `sym` on `day`, or None."""
+    row = (arc.get(sym) or {}).get(day)
+    return row[0] if row else None
+
+
 def delivery_metrics(rows, asof):
     """{date: row} → {"dl": delivery % on `asof`, "dla": 20-session average}."""
     days = sorted(d for d in rows or {} if d <= asof and rows[d][4] is not None)
