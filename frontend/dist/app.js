@@ -68,6 +68,7 @@
       n_groups_per_level: staticData.levels.map(l => l.groups.length),
       n_window: m.n_window || 0,
       excluded: m.excluded || [],
+      illiquid: m.illiquid || [],
       src: m.src || {},
       ipo: m.ipo || [],
     };
@@ -1140,6 +1141,7 @@
         <thead><tr><th>Call</th><th>5 sessions</th><th>10 sessions</th><th>20 sessions</th></tr></thead>
         <tbody><tr><td title="average return of the day's top 25 breakout candidates minus NIFTY 500">Breakout watch vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].brk)).join('')}</tr>
           <tr><td title="average return of the day's top 15 pullback candidates minus NIFTY 500">Pullbacks vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].pb)).join('')}</tr>
+          <tr><td title="average return of the day's top 15 IPO bases minus NIFTY 500">IPO bases vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].ipo)).join('')}</tr>
           <tr><td title="breakout watch vs NIFTY 500, split by the market regime on the day of the call">Breakouts by regime</td>${HZ.map(brkReg).join('')}</tr>
           <tr><td title="NIFTY 500's average return after days with each regime reading">NIFTY 500 after each regime</td>${HZ.map(reg).join('')}</tr></tbody></table></div>
       <div class="dc-note">Lists are bought at that day's close and held, without stops or costs — the raw edge of the screen, not a trading result.</div>`;
@@ -1229,6 +1231,7 @@
     const inLead = m => hot.has(m.industry) || hot.has(m.sector);
     const pick = syms => syms.map(s => byS.get(s)).filter(Boolean);
     const breakouts = pick(D.breakouts), pullbacks = pick(D.pullbacks), extended = pick(D.extended);
+    const ipos = pick(D.ipos || []), IR = D.ipo_rules || {};
     const ind = Object.fromEntries(D.industries.map(r => [r.name, r]));
     const leadInd = D.lead_ind.map(n => ind[n]).filter(Boolean);
 
@@ -1256,13 +1259,37 @@
         <td>${((D.tags || {})[m.s] || []).map(t => `<span class="dc-tag t-${t}" title="${TAG_TIP[t]}">${TAG_WORD[t]}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="dc-empty">${empty}</div>`;
 
+    const fmtDay = d => { const [, mo, dd] = d.split('-'); return `${+dd} ${MON[+mo - 1]}`; };
+    const tagCell = m => ((D.tags || {})[m.s] || []).map(t => `<span class="dc-tag t-${t}" title="${TAG_TIP[t]}">${TAG_WORD[t]}</span>`).join('');
+    const ipoTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
+      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th title="listing day · market sessions since">Listed</th>
+        <th title="IPO issue price">Issue</th><th>Price</th><th title="% above the issue price">vs issue</th>
+        <th title="out-/under-performance vs NIFTY 500 since the listing-day close">vs N500</th><th>1W</th>
+        <th title="% below the highest intraday price since listing">Off high</th><th title="average daily range, 20 days">ADR</th>
+        <th title="average daily traded value, 20 sessions">₹ cr/day</th>
+        <th title="10-session high-low range as % of price — small = a tight base">10d range</th><th>Setup</th></tr></thead>
+      <tbody>${list.slice(0, 15).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
+        <td class="tnum">${i + 1}</td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}${evBadge(m.ev)}</span></td>
+        <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
+        <td class="tnum">${fmtDay(m.ipo.d)}<span class="dc-sub2">${m.ipo.n} sessions</span></td>
+        <td class="tnum">${m.ipo.p == null ? '—' : utils.fmtPrice(m.ipo.p)}</td>
+        <td class="tnum">${utils.fmtPrice(m.l)}</td>
+        <td class="tnum">${tone(m.ipo.g, 0)}</td><td class="tnum">${tone(m.ipo.x, 0)}</td>
+        <td class="tnum">${tone(m.w1)}</td>
+        <td class="tnum">${m.h == null ? '—' : m.h.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
+        <td class="tnum">${m.tt == null ? '—' : m.tt.toFixed(1) + '%'}</td>
+        <td>${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="dc-empty">No recent IPO is basing near its high right now.</div>';
     const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
         <span class="dc-ck">${c.ok === null ? '–' : c.ok ? '✓' : '✗'}</span>${c.t}<span class="dc-cv">${utils.esc(c.v)}</span></li>`).join('');
     const indRows = leadInd.map(r => `<div class="dc-ind-row"><b>${utils.esc(r.name)}</b>
         <span class="dc-muted">${utils.esc(r.sector)}</span>${quadTag(r.quad)}
         <span class="dc-line">${sgn(r.m1)} 1M · ${pctTxt(r.p50)} > 50-EMA · ${r.lead} leaders</span></div>`).join('');
     const ext = extended.map(m => `${stockLink(m)} <span class="dc-muted">${sgn(m.w1, 0)} 1W</span>`).join(' · ');
-    let sec = 5;
+    let sec = 6;
     $.content.innerHTML = `<div class="scan-card dc">
       <div class="scan-head"><div><div class="scan-title">Swing-trading desk</div>
         <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div></div>
@@ -1285,6 +1312,12 @@
           <div class="dc-note">RS ≥ ${S.pbMinRS}, above the 50 and 200-day EMAs but back below the 20-day, ${S.pbOffHigh[0]}–${S.pbOffHigh[1]}% off the high.
             Enter when it turns back up (reclaims the prior day's high / the 20-EMA); stop under the pullback low.</div>
           ${table(pullbacks, 15, 'No leader is pulling back in an orderly way right now.')}</section>
+        <section class="dc-wide"><h3>5 · IPO bases — new listings near their highs <span class="dc-muted">${ipos.length} stocks</span></h3>
+          <div class="dc-note">Mainboard IPOs ${IR.minAge}–${IR.maxAge} sessions old — too young for an RS rating or a 200-day EMA, so the breakout watch can't see them.
+            Above the issue price, ahead of NIFTY 500 since the listing day, above every EMA it has, within ${IR.maxOffHigh}% of the high since listing,
+            ADR ${IR.minAdr}–${IR.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${IR.maxWeek}% this week.
+            The classic entry is a breakout above the post-listing high after a few quiet weeks; stop under the base low. Young stocks move fast — size smaller.</div>
+          ${ipoTable(ipos)}</section>
         ${extended.length ? `<section class="dc-wide"><h3>${sec++} · Don't chase — extended leaders</h3>
           <div class="dc-note">Up > 20% in a week or > ${S.maxMonth}% in a month: wait for a base or a pullback.</div>
           <div class="dc-chips">${ext}</div></section>` : ''}
@@ -2278,8 +2311,11 @@
     // Populate stat cards
     document.getElementById('stat-stocks').textContent = state.meta.n_stocks.toLocaleString();
     const nWindow = state.meta.n_window || state.meta.n_stocks;
-    document.getElementById('stat-stocks-sub').textContent =
-      `${nWindow.toLocaleString()} in window · ${(state.meta.n_stocks - nWindow).toLocaleString()} excluded today`;
+    const nThin = (state.meta.illiquid || []).length;
+    const sub = document.getElementById('stat-stocks-sub');
+    sub.textContent = `${nWindow.toLocaleString()} ranked · ${(state.meta.n_stocks - nWindow).toLocaleString()} left out today`
+      + (nThin ? ` (${nThin} thinly traded)` : '');
+    if (nThin) sub.title = `Thinly traded — skipped a session in the last ${state.meta.window || 26} and trade under ₹1 cr a day, so their RS isn't real: ${state.meta.illiquid.join(', ')}`;
     const totalGroups = state.meta.n_groups_per_level.reduce((a, b) => a + b, 0);
     document.getElementById('stat-groups').textContent = totalGroups;
     document.getElementById('stat-groups-sub').textContent =

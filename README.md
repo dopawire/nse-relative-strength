@@ -74,10 +74,21 @@ with:
   shows today's and the 20-day average: steady 50%+ delivery nudges a
   breakout up, a weak-delivery day nudges it down (a small effect in the
   backtest, so a small weight; none for pullbacks, where it didn't help).
+  **IPO bases** — a mainboard IPO up to a year old has no RS rating
+  (< 3 months of history) and no 150/200-day EMA, so the breakout screen
+  can't see it.  Its own screen: 10–250 sessions since listing, above the
+  issue price, ahead of NIFTY 500 since the listing-day close, above every
+  EMA it has, within 10% of the high since listing, ADR 2–10%, ≥ ₹5 cr/day,
+  not up > 15% this week; tight bases rank first.  Real IPOs come from NSE's
+  public-issues list (`refresh_events.py` → `nse_ipos.csv`, with the issue
+  price) — not from a stock's first session, since NSE also lists old BSE
+  companies directly.  Backtest (250 sessions): +4.7% vs NIFTY 500 over 20
+  sessions, 64% of picks beating it — but any recent IPO did +3.6% in this
+  strong IPO year, so most of that is the IPO market, the screen adds ~1%.
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and
-  pullback lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
+  pullback / IPO-base lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
   each regime.  `backfill_picks.py` rebuilt the year before live logging from
   price history with the same rules (marked as such).  The rules live in
   `rs_engine/decide.py`, so the pages, the log and the brief always agree.
@@ -100,6 +111,12 @@ with:
   averaged across constituents each day.
 - `RS[t] = group_index[t] / benchmark_norm[t]` (both base-100).
 - `RS_STS% = PERCENTRANK.INC(RS_series, latest RS)` over the 26-day window.
+- **Thinly traded stocks are left out of every ranking** (groups, RS
+  rating, Focus / Swing, rotation): a stock that skipped a session of the
+  26-day window *and* trades under ₹1 crore a day (`illiquid_turnover_cr`
+  in config.toml).  Its untraded days carry the last price, so its RS isn't
+  real.  A liquid stock suspended for a day stays in.  They're listed in
+  `meta.illiquid` (hover the stock count on the site).
 - Stocks without a close every window day (suspensions, halts, new listings)
   are excluded from the view — the window count is reported in the UI.
 
@@ -163,7 +180,7 @@ with:
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
 | `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
 | `backfill_picks.py` | Rebuild past Focus / Swing calls from price history into `nse_picks.jsonl` (one-off; live builds log each day). |
-| `refresh_events.py` | Update `nse_events.csv` — NSE board meetings (results, dividends, splits…) for the next 30 days. Best effort. |
+| `refresh_events.py` | Update `nse_events.csv` — NSE board meetings (results, dividends, splits…) for the next 30 days — and `nse_ipos.csv`, NSE's list of mainboard IPOs with issue prices. Best effort. |
 | `send_brief.py` | Evening Telegram brief + watchlist alerts (once per session; no-op without a bot token). |
 | `watchlist.py` | Watchlist file + alert rules for the brief. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |

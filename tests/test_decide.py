@@ -143,3 +143,50 @@ def test_decide_from_rs_data_joins_levels_and_flows():
     data["flows"]["months"].pop()                 # only last month's flow → not this month's
     fii = [c for c in decide.decide_from_rs_data(data)["regime"]["checks"] if c["t"].startswith("FIIs")][0]
     assert fii["ok"] is None
+
+
+def ipo_stock(s, n=40, price=100.0, ltp=130.0, x=20.0, **kw):
+    m = stock(s, "Alpha", rr=None, e=(1, 0 if n < 50 else 1, -1, -1, -1) if n >= 20 else (-1,) * 5,
+              ltp=ltp, **kw)
+    m["e"] = [1 if x_ != -1 else -1 for x_ in m["e"]]
+    m["ipo"] = {"d": "2026-10-01", "p": price, "n": n, "g": (ltp / price - 1) * 100, "x": x}
+    return m
+
+
+def test_ipo_bases():
+    st = universe() + [
+        ipo_stock("IPOA", h=2),                        # basing at its high: in
+        ipo_stock("IPOB", h=8, n=15),                  # 15 sessions, no EMAs yet: in
+        ipo_stock("UNDER", ltp=95),                    # below the issue price
+        ipo_stock("LAG", x=-5),                        # behind NIFTY 500 since listing
+        ipo_stock("DEEP", h=18),                       # too far off the high
+        ipo_stock("YOUNG", n=5),                       # no base yet
+        ipo_stock("THINIPO", tv=1),                    # illiquid
+        ipo_stock("HOT", w1=30),                       # extended this week
+    ]
+    weak = ipo_stock("WEAK")
+    weak["e"] = [0, -1, -1, -1, -1]                    # below its 20-EMA
+    d = decide.analyse(st + [weak])
+    assert d["ipos"] == ["IPOA", "IPOB"]               # nearer the high first
+    assert "IPOA" not in d["breakouts"]                # no RS rating: breakouts can't see it
+    assert d["ipo_rules"]["maxOffHigh"] == 10
+    rec = track.pick_record({**d, "asof": "2026-11-23"})
+    assert rec["ipos"] == ["IPOA", "IPOB"]
+
+
+def test_above_all_ignores_missing_emas():
+    assert decide.above_all({"e": [1, 1, -1, -1, -1]})
+    assert not decide.above_all({"e": [1, 0, -1, -1, -1]})
+    assert decide.above_all({"e": [-1] * 5})
+
+
+def test_add_missing_fills_only_new_lists(tmp_path):
+    p = str(tmp_path / "picks.jsonl")
+    live = {"date": "2026-11-20", "regime": "on", "breakouts": ["A"]}
+    track.save_pick(live, p)
+    bt = {"date": "2026-11-20", "regime": "off", "breakouts": ["B"], "ipos": ["C"], "bt": True}
+    assert not track.save_pick(bt, p)
+    assert track.add_missing(bt, p)
+    got = track.read_picks(p)[0]
+    assert got == {"date": "2026-11-20", "regime": "on", "breakouts": ["A"], "ipos": ["C"]}
+    assert not track.add_missing(bt, p)                 # nothing left to add

@@ -7,6 +7,9 @@ EMA21) from the cached prices as they stood that evening, and the same
 rs_engine.decide rules pick from them.  Lines are marked "bt": true and never
 replace a live pick.
 
+Thinly traded stocks are left out per day and IPOs (nse_ipos.csv) get
+their IPO-base fields, as in the live build.
+
 Known differences from a live pick, all small: today's classification and
 size lists are used for the past, the group RS_STS% measure is left out of
 the sector score, FII flows only count where daily figures exist, and
@@ -21,8 +24,8 @@ from bisect import bisect_right
 
 import build_rs as B
 from rs_engine import decide, flows, nse_archive, track
-from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, WINDOW
-from rs_engine.maths import index_trend
+from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, ILLIQUID_TURNOVER_CR, WINDOW
+from rs_engine.maths import index_trend, ipo_metrics
 
 
 def _emas(vals, period):
@@ -42,11 +45,13 @@ def _emas(vals, period):
 class Stock:
     """One stock's history, pre-indexed so any as-of date is a lookup."""
 
-    def __init__(self, u, ser, hi, lo, vol, bench):
+    def __init__(self, u, ser, hi, lo, vol, bench, ipo=None):
         self.u = u
+        self.ipo = ipo
         self.ds = sorted(ser)
         self.c = [ser[d] for d in self.ds]
         self.hi, self.lo, self.vol = hi, lo, vol
+        self.bench = bench
         self.ema = {p: _emas(self.c, p) for p in EMA_PERIODS}
         common = [i for i, d in enumerate(self.ds) if d in bench]
         self.rs_i = common
@@ -135,11 +140,21 @@ class Stock:
         nw = None
         if self.ds[0] > window_start:
             nw = len([d for d in self.ds[:i + 1] if d >= window_start])
+        # thinly traded that day (maths.is_illiquid): skipped a session of the
+        # RS window and < ₹1 cr/day — left out, as the live build does
+        if cal is not None and (tv is None or tv < ILLIQUID_TURNOVER_CR):
+            first = self.ds[0]
+            if any(d >= first and not self.vol.get(d) for d in cal[max(0, k - WINDOW + 1):k + 1]):
+                return None
+        ipo = None
+        if self.ipo and cal is not None:
+            ipo = ipo_metrics(dict(zip(self.ds[:i + 1], self.c[:i + 1])), self.ipo,
+                              cal[:k + 1], self.bench)
         return {"s": self.u["sym"], "n": self.u["name"], "sector": self.u["sector"],
                 "industry": self.u["industry"], "cap": cap,
                 "e": e, "b": rse, "h": h, "a": a, "l": price, "nw": nw,
                 "m1": self.ret(i, sess(20)), "m3": self.ret(i, sess(63)), "w1": self.ret(i, sess(5)),
-                "tv": tv, "vr": vr, "vd": vd, "tt": tt, "_i": i}
+                "tv": tv, "vr": vr, "vd": vd, "tt": tt, "ipo": ipo, "_i": i}
 
     def rr_score(self, i):
         if i <= 63:
@@ -164,9 +179,10 @@ def iter_days(sessions):
     osc_by_day = dict(zip(brd.get("dates", []), brd.get("osc", [])))
     daily_flows = flows.read_csv(flows.DAILY, "date")
     arc = B.load_json_cache(nse_archive.ARCHIVE)
+    ipo_list = B.read_ipos()
 
     stocks = [Stock(u, cache[u["sym"]], highs.get(u["sym"], {}), lows.get(u["sym"], {}),
-                    vols.get(u["sym"], {}), bench)
+                    vols.get(u["sym"], {}), bench, ipo_list.get(u["sym"]))
               for u in universe if cache.get(u["sym"])]
     bdates = sorted(bench)
     for day in bdates[-sessions:]:
@@ -204,12 +220,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sessions", type=int, default=250)
     args = ap.parse_args()
-    done = total = 0
+    done = total = added = 0
     for _day, _recs, dec in iter_days(args.sessions):
         total += 1
-        if track.save_pick(track.pick_record(dec, backtest=True)):
+        rec = track.pick_record(dec, backtest=True)
+        if track.save_pick(rec):
             done += 1
-    print(f"backfilled {done} of {total} sessions → {track.PICKS}")
+        elif track.add_missing(rec):
+            added += 1
+    print(f"backfilled {done} of {total} sessions → {track.PICKS}"
+          + (f"; added new lists to {added} live session(s)" if added else ""))
 
 
 if __name__ == "__main__":

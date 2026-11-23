@@ -53,12 +53,41 @@ def test_refresh_events_main(tmp_path, monkeypatch):
     class S:
         headers = {}
 
-        def get(self, url, timeout):
+        def get(self, url, timeout, headers=None):
+            if "past-issues" in url:
+                return R([{"symbol": "NEWIPO", "securityType": "Equity",
+                           "listingDate": "03-NOV-2026", "issuePrice": "150"}])
             if "board-meetings" in url:
                 return R([{"bm_symbol": "AAA", "bm_date": d1.strftime("%d-%b-%Y"), "bm_purpose": "Financial Results"}])
             return R([{"symbol": "BBB", "date": d2.strftime("%d-%b-%Y"), "purpose": "Dividend"}])
     monkeypatch.setattr(events, "EVENTS", str(tmp_path / "ev.csv"))
+    from rs_engine import ipos
+    monkeypatch.setattr(ipos, "IPOS", str(tmp_path / "ipos.csv"))
     monkeypatch.setattr(re_.requests, "Session", S)
     assert re_.main() == 0
+    assert ipos.read()["NEWIPO"] == {"listed": "2026-11-03", "price": 150.0}
     ev = events.read_events()
     assert ev[("AAA", d1.isoformat())] == "Results" and ev[("BBB", d2.isoformat())] == "Dividend"
+
+
+def test_parse_ipos_mainboard_only(tmp_path):
+    from rs_engine import ipos
+    rows = [{"symbol": "JPL", "securityType": "Equity", "listingDate": "28-OCT-2026", "issuePrice": "  1119"},
+            {"symbol": "SMEX", "securityType": "SME", "listingDate": "28-OCT-2026", "issuePrice": "50"},
+            {"symbol": "SOON", "securityType": "Equity", "listingDate": "-", "issuePrice": "-"},
+            {"symbol": "OLD", "securityType": "Equity", "listingDate": "18-Sep-2012", "issuePrice": None}]
+    got = ipos.parse_nse(rows)
+    assert got == {"JPL": {"listed": "2026-10-28", "price": 1119.0},
+                   "OLD": {"listed": "2012-09-18", "price": None}}
+    p = str(tmp_path / "ipos.csv")
+    ipos.write(got, p)
+    assert ipos.read(p) == got
+
+
+def test_read_ipos_follows_renames(tmp_path, monkeypatch):
+    import build_rs as B
+    from rs_engine import ipos
+    p = str(tmp_path / "ipos.csv")
+    ipos.write({"OLDSYM": {"listed": "2026-05-01", "price": 100.0}}, p)
+    monkeypatch.setattr(ipos, "IPOS", p)
+    assert B.read_ipos([("OLDSYM", "NEWSYM")]) == {"NEWSYM": {"listed": "2026-05-01", "price": 100.0}}

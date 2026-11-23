@@ -2,7 +2,7 @@
 
 Input is one record per stock (the fields rs_data.json carries for a member:
 s, n, sector, industry, cap, e, b, h, a, l, nw, m1, m3, w1, tv, rr, plus the
-optional setup fields vr / tt / dl), the NIFTY 500 trend, the breadth
+optional setup fields vr / tt / dl and the ipo block), the NIFTY 500 trend, the breadth
 oscillator and the month's FII flow.  Output is plain data: the pages render
 it, the pick log records it and the evening brief sends it, so all three
 always agree.
@@ -22,7 +22,12 @@ CAP_ORDER = ["Large", "Mid", "Small", "Micro"]
 # daily range to pay for the risk — and not already extended.
 SWING = {"minRS": 80, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 8, "minTurnoverCr": 5,
          "minPrice": 50, "maxWeek": 15, "maxMonth": 50, "pbMinRS": 75, "pbOffHigh": (5, 25)}
-N_BREAKOUTS, N_PULLBACKS, N_EXTENDED = 25, 15, 12
+# IPO bases: a mainboard IPO from its first weeks to a year old has no RS
+# rating (< 3 months) and no 150/200-day EMA, so the breakout screen can't
+# see it.  Its own screen: holding above the issue price, beating NIFTY 500
+# since listing, above every EMA it has, near its high since listing.
+IPO = {"minAge": 10, "maxAge": 250, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 10, "maxWeek": 15}
+N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS = 25, 15, 12, 15
 
 
 def median(xs):
@@ -165,8 +170,25 @@ def _liquid(m):
             and (m.get("l") or 0) >= SWING["minPrice"])
 
 
-def _range_ok(m):
-    return m.get("a") is not None and SWING["minAdr"] <= m["a"] <= SWING["maxAdr"]
+def _range_ok(m, lo=SWING["minAdr"], hi=SWING["maxAdr"]):
+    return m.get("a") is not None and lo <= m["a"] <= hi
+
+
+def above_all(m):
+    """Above every EMA it has history for (a young stock has only some)."""
+    e = m.get("e") or []
+    return all(x == 1 for x in e if x != -1)
+
+
+def ipo_base(m):
+    """The IPO-base screen (see IPO)."""
+    i, R = m.get("ipo"), IPO
+    return bool(i) and R["minAge"] <= i["n"] <= R["maxAge"] \
+        and i.get("p") is not None and (m.get("l") or 0) > i["p"] \
+        and i.get("x") is not None and i["x"] > 0 \
+        and above_all(m) and m.get("h") is not None and m["h"] <= R["maxOffHigh"] \
+        and _range_ok(m, R["minAdr"], R["maxAdr"]) and _liquid(m) \
+        and (m.get("w1") is None or m["w1"] <= R["maxWeek"])
 
 
 def tight(m):
@@ -257,6 +279,11 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
           and has_ema(m, 20) and not above(m, 20) and m.get("h") is not None
           and S["pbOffHigh"][0] <= m["h"] <= S["pbOffHigh"][1] and _range_ok(m) and _liquid(m)]
     pb.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 0.5 * m["h"] + setup_bonus(m)))
+    # IPO bases: tight and near the high first; strength since listing next
+    in_brk = {m["s"] for m in brk}
+    ipo = [m for m in stocks if ipo_base(m) and m["s"] not in in_brk]
+    ipo.sort(key=lambda m: (-(10 * in_lead(m) - 1.5 * m["h"] + setup_bonus(m)
+                              + 0.2 * min(m["ipo"]["x"], 100)), m["s"]))
     ext = [m for m in live if (m.get("rr") or 0) >= S["minRS"] and _liquid(m)
            and ((m.get("w1") or 0) > 20 or (m.get("m1") or 0) > S["maxMonth"])]
     ext.sort(key=lambda m: -(m.get("w1") or 0))
@@ -276,10 +303,12 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
         "breakouts": [m["s"] for m in brk],
         "pullbacks": [m["s"] for m in pb],
         "extended": [m["s"] for m in ext][:N_EXTENDED],
+        "ipos": [m["s"] for m in ipo],
         "rules": {k: list(v) if isinstance(v, tuple) else v for k, v in SWING.items()},
+        "ipo_rules": dict(IPO),
         "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge),
                                          ("dhi", deliv_high), ("dlo", deliv_weak)) if f(m)]
-                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS]},
+                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS] + ipo[:N_IPOS]},
     }
 
 

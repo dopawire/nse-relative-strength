@@ -88,7 +88,7 @@ def test_page_loads_without_js_errors(browser_page):
     assert errors == [], f"page errors: {errors}"
     # stat cards must be populated (the stat-stocks-sub regression)
     assert page.inner_text("#stat-stocks").strip() not in ("", "—")
-    assert "in window" in page.inner_text("#stat-stocks-sub")
+    assert "ranked" in page.inner_text("#stat-stocks-sub")
 
 
 def test_breadth_tab_renders_macro_dashboard(browser_page):
@@ -303,6 +303,10 @@ def test_focus_and_swing_pages(server, browser):
     page.wait_for_selector(".dc-checks")
     assert len(page.query_selector_all(".dc-checks li")) == 7
     assert page.inner_text(".scan-title") == "Swing-trading desk"
+    heads = [h.inner_text() for h in page.query_selector_all(".dc-wide h3")]
+    assert any(h.upper().startswith("5 · IPO BASES") for h in heads), heads
+    track_rows = [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")]
+    assert any("IPO BASES" in t.upper() for t in track_rows)
     rows = page.query_selector_all(".dc-tr")
     if rows:                                   # click opens the stock RS chart
         rows[0].click()

@@ -1,7 +1,7 @@
 """RS maths: percentile rank, EMA flags, corporate-action breaks, ADR,
 equal-weight group index vs the benchmark."""
 
-from rs_engine.config import EMA_PERIODS, ADR_PERIOD, CORP_ACTION_JUMP
+from rs_engine.config import EMA_PERIODS, ADR_PERIOD, CORP_ACTION_JUMP, ILLIQUID_TURNOVER_CR
 
 
 def percentrank_inc(arr, x):
@@ -285,3 +285,51 @@ def setup_metrics(closes, highs, lows, volumes, since=None):
         if last > 0 and hi >= lo > 0:
             out["tt"] = round((hi - lo) / last * 100, 2)
     return out
+
+
+def untraded_sessions(closes, volumes, window):
+    """Sessions of `window` (market sessions) on or after the stock's first
+    bar on which it didn't trade (no volume)."""
+    if not closes:
+        return 0
+    first = min(closes)
+    return sum(1 for d in window if d >= first and not (volumes or {}).get(d))
+
+
+def is_illiquid(closes, volumes, window, max_turnover_cr=ILLIQUID_TURNOVER_CR):
+    """Thinly traded: skipped at least one session of the RS window AND
+    trades under ₹`max_turnover_cr` crore a day.  Its untraded days carry the
+    last price, so its RS and returns aren't real — it's left out of the
+    rankings.  (A liquid stock suspended for a day or two — a consolidation,
+    an exchange hiccup — stays in.)"""
+    if not untraded_sessions(closes, volumes, window):
+        return False
+    tv = avg_turnover_cr(closes, volumes or {}, 20)
+    return tv is None or tv < max_turnover_cr
+
+
+def ipo_metrics(closes, ipo, calendar, bench=None, max_age=252):
+    """A mainboard IPO listed in the last `max_age` market sessions:
+    {"d": listing day, "p": issue price, "n": sessions since listing
+    (1 = the listing day), "g": % vs the issue price, "x": % out-/under-
+    performance vs NIFTY 500 since the listing-day close}.  None for older
+    listings, or when the cached history starts well before the listing
+    day (a renamed / relisted symbol, not this IPO)."""
+    if not ipo or not closes or not calendar:
+        return None
+    listed, price = ipo.get("listed"), ipo.get("price")
+    first = min(closes)
+    if not listed or listed > calendar[-1] or first < listed:
+        return None
+    age = len([d for d in calendar if d >= listed])
+    if age > max_age:
+        return None
+    # the history should start on (or within days of) the listing
+    if len([d for d in calendar if listed <= d < first]) > 5:
+        return None
+    last = closes[max(closes)]
+    x = None
+    if bench and bench.get(first) and bench.get(max(closes)) and closes[first]:
+        x = round(((last / closes[first]) / (bench[max(closes)] / bench[first]) - 1) * 100, 1)
+    return {"d": listed, "p": price, "n": age,
+            "g": round((last / price - 1) * 100, 1) if price else None, "x": x}

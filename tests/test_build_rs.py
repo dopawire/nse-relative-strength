@@ -776,8 +776,8 @@ def test_macro_breadth_math(price_cache, rs_data):
 
 def test_window_coverage_consistent(rs_data, price_cache):
     """n_stocks (universe) ≥ n_window (stocks in the levels), and every
-    excluded stock genuinely lacks ≥1 of the 26 window dates — i.e. no stock
-    with complete window data is silently dropped."""
+    excluded stock genuinely lacks ≥1 of the 26 window dates or is thinly
+    traded — i.e. no liquid stock with complete window data is silently dropped."""
     meta = rs_data["meta"]
     union = {m["s"] for lvl in rs_data["levels"] for g in lvl["groups"]
              for m in g["members"] if not m.get("nw")}       # new listings: IPO watch
@@ -790,7 +790,9 @@ def test_window_coverage_consistent(rs_data, price_cache):
     bench = price_cache["__BENCH__"]
     if ref_dates and max(bench) != ref_dates[-1]:
         pytest.skip("price cache updated since the build — run build_rs.py to resync")
-    for s in meta["excluded"][:50]:
+    illiquid = set(meta.get("illiquid", []))
+    assert illiquid <= set(meta["excluded"]) and not illiquid & union
+    for s in [x for x in meta["excluded"] if x not in illiquid][:50]:
         ser = price_cache.get(s, {})
         missing_day = any(d not in ser or not ser[d] for d in ref_dates)
         # corporate-action break inside the window also justifies exclusion

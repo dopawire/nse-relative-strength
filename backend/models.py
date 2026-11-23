@@ -10,6 +10,7 @@ class MetaResponse(BaseModel):
     n_groups_per_level: list[int]
     n_window: int = 0          # stocks with full window data (in the levels)
     excluded: list[str] = []   # stocks with price data but no window coverage
+    illiquid: list[str] = []   # thinly traded: left out of the rankings
     src: dict[str, str] = {}   # {date: source} for non-Yahoo benchmark bars
     ipo: list[dict] = []       # new listings awaiting their first ranking
 
@@ -45,6 +46,7 @@ class MemberOut(BaseModel):
     dl: float | None = None   # delivery % today (EQ series)
     dla: float | None = None  # delivery %, 20-session average
     ev: str | None = None     # next corporate event within 14 days: "YYYY-MM-DD Results"
+    ipo: dict | None = None   # mainboard IPO in the last year: {d, p, n, g, x}
 
 
 class GroupOut(BaseModel):

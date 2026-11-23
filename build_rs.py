@@ -54,7 +54,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs, period_return, avg_turnover_cr, index_trend,
-                             setup_metrics,
+                             setup_metrics, is_illiquid, ipo_metrics,
                              rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -63,7 +63,7 @@ from rs_engine.flows import build_flows
 from rs_engine.decide import decide_from_rs_data
 from rs_engine import track
 from rs_engine.events import next_events, read_events
-from rs_engine import nse_archive
+from rs_engine import nse_archive, ipos
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -160,6 +160,16 @@ def cap_class(sym, caps, n_sessions):
     if sym in caps:
         return caps[sym]
     return "Micro" if n_sessions > NO_CAP_SESSIONS else "New"
+
+
+def read_ipos(changes=None):
+    """nse_ipos.csv keyed by today's symbol (an IPO renamed since listing
+    follows its rename)."""
+    out = ipos.read()
+    for old, new in changes if changes is not None else read_symbol_changes():
+        if old in out and new not in out:
+            out[new] = out.pop(old)
+    return out
 
 
 def read_symbol_changes():
@@ -931,6 +941,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=No
                 })
                 if m.get("ev"):               # upcoming event: "YYYY-MM-DD Results"
                     members_out[-1]["ev"] = m["ev"]
+                if m.get("ipo"):              # mainboard IPO in the last year
+                    members_out[-1]["ipo"] = m["ipo"]
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
                 "n": it["n"], "pct": round(it["pct"], 4),
@@ -1109,8 +1121,18 @@ def main():
     # high count sessions, not a stock's own bars (illiquid stocks skip days)
     cal = [d for d in sorted(bench) if d <= ref_dates[-1]]
     year_start = cal[-252] if len(cal) >= 252 else cal[0]
+    # thinly traded stocks (skip sessions, < ₹1 cr/day) are left out of every
+    # ranking: their untraded days carry the last price, so RS isn't real
+    illiquid = sorted(u["sym"] for u in universe if cache.get(u["sym"])
+                      and is_illiquid(cache[u["sym"]], volumes.get(u["sym"]), ref_dates))
+    illiq = set(illiquid)
+    if illiquid:
+        print(f"Left out of the rankings: {len(illiquid)} thinly traded stock(s) "
+              f"(skipped a session in the window, < ₹1 cr/day): {illiquid[:12]}"
+              f"{' …' if len(illiquid) > 12 else ''}")
     ratings = rs_ratings({u["sym"]: cache[u["sym"]] for u in universe
-                          if cache.get(u["sym"])}, ref_dates[-1])
+                          if cache.get(u["sym"]) and u["sym"] not in illiq}, ref_dates[-1])
+    ipo_list = read_ipos()
 
     def stock_metrics(u, ser):
         """Full-window metrics, or — for a stock listed INSIDE the window with
@@ -1145,6 +1167,7 @@ def main():
                       "rr": ratings.get(sym),
                       "cap": cap_class(sym, caps, len(ser)),
                       "ev": upcoming.get(sym),
+                      "ipo": ipo_metrics(ser, ipo_list.get(sym), cal, bench),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
                                       volumes.get(sym, {}), since=brk),
                       **nse_archive.delivery_metrics(arc.get(sym), ref_dates[-1])}
@@ -1163,7 +1186,7 @@ def main():
             series, stocks = [], []
             for u in members:
                 ser = cache.get(u["sym"])
-                if not ser:
+                if not ser or u["sym"] in illiq:
                     continue
                 # a corporate action inside the RS window would swamp the equal-weight
                 # group index (a "+2000% day" is a demerger, not performance) — leave
@@ -1255,7 +1278,8 @@ def main():
 
     ipo = build_ipo_watch(universe, cache, set(excluded),
                           cache.get("__BENCH__", {}))
-    rotation = compute_rotation(universe, cache, cache.get("__BENCH__", {}),
+    rotation = compute_rotation([u for u in universe if u["sym"] not in illiq],
+                                cache, cache.get("__BENCH__", {}),
                                 breadth_dates) if breadth_dates else \
         {"dates": [], "groups": []}
     if ipo:
@@ -1270,6 +1294,7 @@ def main():
         "n_stocks": n_stocks,
         "n_window": n_window,
         "excluded": excluded,
+        "illiquid": illiquid,
         "src": prov,
         "ipo": ipo,
     }
@@ -1283,7 +1308,7 @@ def main():
                 track.save_pick(track.pick_record(dec))
             uni = [{"sym": u["sym"], "sector": u["sector"],
                     "cap": cap_class(u["sym"], caps, len(cache.get(u["sym"], {})))}
-                   for u in universe]
+                   for u in universe if u["sym"] not in illiq]
             data["track"] = track.track_for_site(track.evaluate(track.read_picks(), cache, uni))
         except Exception as e:                      # never lose the build over it
             print("decisions / track record failed:", e)

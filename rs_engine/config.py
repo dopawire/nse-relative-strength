@@ -46,6 +46,7 @@ MIN_BARS = int(cfg("min_bars", 200))            # below → refetch FULL_RANGE
 EMA_PERIODS = [int(x) for x in cfg("ema_periods", [20, 50, 100, 150, 200])]
 ADR_PERIOD = int(cfg("adr_period", 20))         # ADR% lookback (Qullamaggie 20)
 CORP_ACTION_JUMP = float(cfg("corp_action_jump", 0.40))
+ILLIQUID_TURNOVER_CR = float(cfg("illiquid_turnover_cr", 1.0))  # ₹ cr/day, see maths.is_illiquid
 BENCHMARK_NAME = str(cfg("benchmark", "NIFTY 500"))
 BENCH_YSYM = str(cfg("bench_symbol", "^CRSLDX"))
 YH_WORKERS = int(cfg("yahoo_workers", 8))

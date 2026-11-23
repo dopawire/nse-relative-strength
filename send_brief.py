@@ -92,7 +92,7 @@ def compose(data, watch=None, save=True):
 
     def row(s):
         m = ms.get(s, {})
-        bits = [f"RS {m.get('rr', '—')}"]
+        bits = [f"RS {m['rr']}" if m.get("rr") is not None else "IPO"]
         if m.get("h") is not None:
             bits.append(f"{m['h']:.1f}% off high")
         t = [x for x in tags.get(s, []) if x in ("tight", "dry", "dhi")]
@@ -106,6 +106,12 @@ def compose(data, watch=None, save=True):
     if d.get("pullbacks"):
         lines += ["", f"<b>Pullbacks in leaders</b> ({len(d['pullbacks'])}) — top 3:"]
         lines += [row(s) for s in d["pullbacks"][:3]]
+    if d.get("ipos"):
+        lines += ["", f"<b>IPO bases</b> ({len(d['ipos'])}) — top 3:"]
+        for s in d["ipos"][:3]:
+            i = ms.get(s, {}).get("ipo") or {}
+            extra = f" · {pct(i['g'], 0)} vs issue, listed {day_txt(i['d'])}" if i.get("g") is not None else ""
+            lines.append(row(s) + e(extra))
     if reg["level"] == "off":
         lines.append("<i>Risk-off: breakouts have only matched NIFTY on such days — be very selective.</i>")
 
@@ -115,8 +121,9 @@ def compose(data, watch=None, save=True):
 
     s20 = ((data.get("track") or {}).get("summary") or {}).get("20") or {}
     if s20.get("brk") and s20.get("focus"):
+        ipo = f"IPO bases {pct(s20['ipo']['ex'] * 100)}, " if s20.get("ipo") else ""
         lines += ["", f"📈 <i>Track record (20 sessions): breakouts {pct(s20['brk']['ex'] * 100)} vs NIFTY 500, "
-                      f"focus sectors {pct(s20['focus']['avg'] * 100)} vs the average stock "
+                      f"{ipo}focus sectors {pct(s20['focus']['avg'] * 100)} vs the average stock "
                       f"({s20['focus']['hit'] * 100:.0f}% of days).</i>"]
     lines += ["", f'<a href="{SITE}#/focus">Focus</a> · <a href="{SITE}#/swing">Swing</a> · not investment advice']
     return "\n".join(lines)

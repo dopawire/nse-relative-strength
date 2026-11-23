@@ -152,3 +152,52 @@ def test_period_return_counts_market_sessions():
     assert maths.period_return(c, 5, cal) == pytest.approx((c[cal[-1]] / c[cal[-7]] - 1) * 100)
     assert maths.period_return(c, 5) != pytest.approx(by_cal)     # bar counting reaches further back
     assert maths.period_return(c, 40, cal) is None
+
+
+def test_is_illiquid_needs_a_skipped_session_and_low_turnover():
+    cal = days(40)
+    c = {d: 100.0 for d in cal}
+    thin = {d: 1_000 for d in cal}                  # ₹1 lakh/day
+    assert not maths.is_illiquid(c, thin, cal[-26:])     # trades every day: stays in
+    thin[cal[-3]] = 0                               # one untraded session
+    assert maths.untraded_sessions(c, thin, cal[-26:]) == 1
+    assert maths.is_illiquid(c, thin, cal[-26:])
+    big = {d: 1_000_000 for d in cal}               # ₹10 cr/day, suspended one day
+    del big[cal[-3]]
+    assert not maths.is_illiquid(c, big, cal[-26:])
+    # days before the listing don't count as untraded
+    young = {d: 100.0 for d in cal[-12:]}
+    assert maths.untraded_sessions(young, {d: 5 for d in young}, cal[-26:]) == 0
+
+
+def test_ipo_metrics():
+    cal = days(300)
+    c = {d: 100.0 * (1.01 ** i) for i, d in enumerate(cal[-30:])}
+    bench = {d: 1000.0 for d in cal}
+    m = maths.ipo_metrics(c, {"listed": cal[-30], "price": 80.0}, cal, bench)
+    assert m["d"] == cal[-30] and m["n"] == 30 and m["p"] == 80.0
+    assert m["g"] == pytest.approx((c[cal[-1]] / 80 - 1) * 100, abs=0.05)
+    assert m["x"] == pytest.approx((1.01 ** 29 - 1) * 100, abs=0.05)   # NIFTY flat
+    assert maths.ipo_metrics(c, {"listed": cal[-260], "price": 80.0}, cal) is None   # > 1 year
+    old = {d: 1.0 for d in cal}                     # history long before the listing day
+    assert maths.ipo_metrics(old, {"listed": cal[-30], "price": 80.0}, cal) is None
+    late = {d: v for d, v in c.items() if d >= cal[-20]}   # history starts 10 sessions late
+    assert maths.ipo_metrics(late, {"listed": cal[-30], "price": 80.0}, cal) is None
+
+
+def test_backfill_record_ipo_and_illiquid():
+    import backfill_picks as bp
+    ds = days(320)
+    c = {d: 100.0 + i * 0.1 for i, d in enumerate(ds[-40:])}
+    hl = {d: v * 1.01 for d, v in c.items()}
+    ll = {d: v * 0.99 for d, v in c.items()}
+    vol = {d: 200_000 for d in c}
+    bench = {d: 1000.0 for d in ds}
+    u = {"sym": "NEWCO", "name": "N", "sector": "S", "industry": "I"}
+    ipo = {"listed": ds[-40], "price": 90.0}
+    k = len(ds) - 1
+    r = bp.Stock(u, c, hl, ll, vol, bench, ipo).record(ds[k], ds[k - 25], "New", ds, k)
+    assert r["ipo"] == maths.ipo_metrics(c, ipo, ds, bench)
+    thin = {d: 100 for d in c}
+    thin[ds[-5]] = 0
+    assert bp.Stock(u, c, hl, ll, thin, bench).record(ds[k], ds[k - 25], "New", ds, k) is None

@@ -4,7 +4,8 @@ Every build appends the day's picks to nse_picks.jsonl (one line per
 session; backfilled days carry "bt": true).  evaluate() then measures each
 call 5 / 10 / 20 sessions later from the adjusted price cache:
 
-  breakouts / pullbacks   average return of the listed stocks vs NIFTY 500,
+  breakouts / pullbacks / IPO bases
+                          average return of the listed stocks vs NIFTY 500,
                           and the share of them that beat NIFTY 500
   focus sectors           their stocks' average return vs the average stock
   avoid sectors           how far they trailed the average stock
@@ -20,7 +21,7 @@ from rs_engine.config import CORP_ACTION_JUMP
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PICKS = os.path.join(ROOT, "nse_picks.jsonl")
 HORIZONS = (5, 10, 20)
-N_BREAKOUTS, N_PULLBACKS = 25, 15
+N_BREAKOUTS, N_PULLBACKS, N_IPOS = 25, 15, 15
 
 
 def pick_record(dec, backtest=False):
@@ -28,7 +29,7 @@ def pick_record(dec, backtest=False):
            "pass": dec["regime"]["pass"], "known": dec["regime"]["known"],
            "focus": dec["focus"], "avoid": dec["avoid"], "turning": dec["turning"],
            "cap": dec["cap"], "breakouts": dec["breakouts"][:N_BREAKOUTS],
-           "pullbacks": dec["pullbacks"][:N_PULLBACKS]}
+           "pullbacks": dec["pullbacks"][:N_PULLBACKS], "ipos": dec.get("ipos", [])[:N_IPOS]}
     if backtest:
         rec["bt"] = True
     return rec
@@ -59,6 +60,22 @@ def save_pick(rec, path=None):
     if old and not old.get("bt") and rec.get("bt"):
         return False
     recs[rec["date"]] = rec
+    write_picks(recs.values(), path)
+    return True
+
+
+def add_missing(rec, path=None):
+    """Give a live pick the lists it was logged without (a list added to the
+    rules later, e.g. "ipos"), from a backfilled rec of the same day.  The
+    live lists already there are never touched."""
+    recs = {r["date"]: r for r in read_picks(path)}
+    old = recs.get(rec["date"])
+    if not old:
+        return False
+    new = {k: v for k, v in rec.items() if k not in old and k != "bt"}
+    if not new:
+        return False
+    old.update(new)
     write_picks(recs.values(), path)
     return True
 
@@ -134,6 +151,7 @@ def evaluate(picks, cache, universe, horizons=HORIZONS):
                 "cap": None if cap is None else cap - avg,
                 "brk": stock_list(p.get("breakouts", [])),
                 "pb": stock_list(p.get("pullbacks", [])),
+                "ipo": stock_list(p.get("ipos", [])),
             }
         rows.append(row)
     return {"rows": rows, "summary": summarise(rows, horizons)}
@@ -172,7 +190,7 @@ def summarise(rows, horizons=HORIZONS):
                 brk_reg[lvl] = {"n": len(b), "ex": mean(x["ex"] for x in b),
                                 "hit": mean(x["hit"] for x in b)}
         out[h] = {"days": len(hs), "focus": edge("focus"), "avoid": edge("avoid"),
-                  "cap": edge("cap"), "brk": lists("brk"), "pb": lists("pb"),
+                  "cap": edge("cap"), "brk": lists("brk"), "pb": lists("pb"), "ipo": lists("ipo"),
                   "regime": reg, "brk_regime": brk_reg}
     return out
 
