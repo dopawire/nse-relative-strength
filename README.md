@@ -61,6 +61,13 @@ with:
   industries, breakout candidates (RS ≥ 80 leaders in a full uptrend within
   10% of the high, liquid, tradeable ADR, not extended), pullbacks in leaders,
   extended stocks not to chase, and risk rules.
+- **Track record** (on both pages) — every build logs the day's calls to
+  `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
+  avoid sectors and the size pick vs the average stock, the breakout and
+  pullback lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
+  each regime.  `backfill_picks.py` rebuilt the year before live logging from
+  price history with the same rules (marked as such).  The rules live in
+  `rs_engine/decide.py`, so the pages, the log and the brief always agree.
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method
@@ -98,7 +105,15 @@ with:
   API serves only the latest session, so the monthly history comes from Kotak
   Neo's FII/DII page, which republishes the same numbers (they reconcile
   exactly with NSE's daily figures); NSE's own day is recorded too, and
-  counted in the running month when Kotak hasn't caught up.
+  counted in the running month when Kotak hasn't caught up.  NSE posts the
+  day's figures between ~18:00 and 21:00, so the hourly catch-up runs also
+  fetch them and patch `rs_data.json` without a full rebuild.
+- **Wrong single bars:** Yahoo occasionally serves a bad close for a thin
+  stock on one day (SAPPL 20-Nov-2026: 318.40 vs NSE's 330.00).  Each build
+  compares the last 5 sessions with the bhavcopy and replaces a close that
+  differs while the days around it agree (an isolated miss — a split or
+  dividend adjustment shifts every earlier bar and is left alone);
+  `build_rs.py --recheck 63` sweeps further back.
 - **Single-stock** null bars (common for fresh listings and renamed tickers)
   inside the RS window are filled from the bhavcopy too, so one missing Yahoo
   day doesn't drop a stock out of the rankings.
@@ -110,6 +125,7 @@ with:
 | `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` (+ the `daily_report.html` digest). |
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
 | `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
+| `backfill_picks.py` | Rebuild past Focus / Swing calls from price history into `nse_picks.jsonl` (one-off; live builds log each day). |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000` (`NSE_RS_HOST=0.0.0.0` to expose it on the LAN). |

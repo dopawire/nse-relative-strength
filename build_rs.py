@@ -59,6 +59,8 @@ from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
 from rs_engine.rotation import compute_rotation
 from rs_engine.flows import build_flows
+from rs_engine.decide import decide_from_rs_data
+from rs_engine import track
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -636,7 +638,44 @@ def apply_official_bars(cache, highs, lows, fills):
     return n
 
 
-def fill_stock_gaps(cache, highs, lows, have, today=None, extra_days=()):
+BAD_BAR_TOL = 0.005       # Yahoo close vs NSE close beyond this = a wrong bar
+BAD_BAR_AGREE = 0.002     # ...when both neighbouring sessions agree within this
+
+
+def _agrees(ser, bhav, sym, day):
+    row = (bhav or {}).get(sym)
+    return bool(row and row["close"] and day in ser
+                and abs(ser[day] / row["close"] - 1) <= BAD_BAR_AGREE)
+
+
+def find_bad_bars(cache, have, fills, bhav_for, sessions):
+    """Single wrong Yahoo closes on thin stocks (SAPPL 20-Nov-2026: 318.40,
+    a copy of the day before, vs NSE's 330.00).  A bar is wrong when it
+    differs from the bhavcopy while the sessions on either side agree — an
+    isolated miss, not a split/dividend adjustment (that shifts every earlier
+    bar alike).  Checks the last `sessions` sessions; → {day: [syms]}."""
+    recent = sorted(cache.get("__BENCH__", {}))[-(sessions + 1):]
+    bad = {}
+    for i in range(1, len(recent)):
+        day, prev = recent[i], recent[i - 1]
+        nxt = recent[i + 1] if i + 1 < len(recent) else None
+        bhav = bhav_for(day)
+        if not bhav:
+            continue
+        for s in have:
+            ser, row = cache[s], bhav.get(s)
+            if (not row or not row["close"] or day not in ser
+                    or day in fills.get(s, {})
+                    or abs(ser[day] / row["close"] - 1) <= BAD_BAR_TOL):
+                continue
+            if _agrees(ser, bhav_for(prev), s, prev) and (
+                    nxt is None or _agrees(ser, bhav_for(nxt), s, nxt)):
+                bad.setdefault(day, []).append(s)
+    return bad
+
+
+def fill_stock_gaps(cache, highs, lows, have, today=None, extra_days=(),
+                    recheck=5):
     """Per-stock gaps: Yahoo sometimes serves a null daily bar for single
     symbols (fresh listings, renamed tickers) or a stale one (purged outage
     days such as 2025-03-18) on days the market traded.  For the last WINDOW
@@ -661,6 +700,15 @@ def fill_stock_gaps(cache, highs, lows, have, today=None, extra_days=()):
             n = record_official_bars(cache, day, gaps, fills, bhav_for)
             if n:
                 recorded[day] = n
+    fixed = {}
+    for day, syms in find_bad_bars(cache, have, fills, bhav_for, recheck).items():
+        n = record_official_bars(cache, day, syms, fills, bhav_for)
+        if n:
+            fixed[day] = syms
+    if fixed:
+        print("Replaced wrong Yahoo closes with NSE's: "
+              + ", ".join(f"{d} {', '.join(s[:6])}{' …' if len(s) > 6 else ''}"
+                          for d, s in sorted(fixed.items())))
     if fills:
         apply_official_bars(cache, highs, lows, fills)
         write_json_atomic(OFFICIAL_FILLS, fills)
@@ -816,8 +864,9 @@ def fill_benchmark_gaps(bench, cache, have, thresh, inv=None):
 # --------------------------------------------------------------------------- #
 #  JSON export for the FastAPI backend
 # --------------------------------------------------------------------------- #
-def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None):
-    """Write precomputed RS data so the backend can serve it without recomputing."""
+def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=None):
+    """Write precomputed RS data so the backend can serve it without recomputing.
+    `post(data)` may add derived sections (decisions, track record) first."""
     data = {
         "meta": meta,
         "breadth": breadth if breadth else {"dates": [], "osc": [], "n": 0},
@@ -859,6 +908,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None):
             })
             gid += 1
         data["levels"].append(level_data)
+    if post:
+        post(data)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f)
 
@@ -872,6 +923,9 @@ def main():
     ap.add_argument("--html-only", action="store_true", help="rebuild outputs from cached prices only (no fetching)")
     ap.add_argument("--refresh", action="store_true",
                     help="(default behaviour now; kept for compatibility)")
+    ap.add_argument("--recheck", type=int, default=5, metavar="N",
+                    help="compare the last N sessions with NSE's bhavcopy and "
+                         "replace wrong single Yahoo bars (default 5)")
     ap.add_argument("--fast", action="store_true",
                     help="incremental top-up only — quicker, but leaves historical "
                          "data un-revalidated and drifts the breadth oscillator")
@@ -943,7 +997,8 @@ def main():
     if not args.html_only:
         _rep = repair_intraday_gap(cache, highs, lows, have, thresh, prov=prov)
         purged = purge_flat_carries(cache, highs, lows, have)
-        fill_stock_gaps(cache, highs, lows, have, extra_days=purged)
+        fill_stock_gaps(cache, highs, lows, have, extra_days=purged,
+                        recheck=args.recheck)
     # Always persist the sidecar (empty = every bar came from Yahoo) so audit
     # checks and fresh runners see the file.
     write_json_atomic(PROVENANCE, prov)
@@ -1145,7 +1200,23 @@ def main():
         "src": prov,
         "ipo": ipo,
     }
-    save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation, build_flows())
+    def add_decisions(data):
+        """Focus / Swing picks (one set of rules for the pages, the pick log
+        and the evening brief) and their track record."""
+        try:
+            dec = decide_from_rs_data(data)
+            data["decide"] = dec
+            if not args.limit:
+                track.save_pick(track.pick_record(dec))
+            uni = [{"sym": u["sym"], "sector": u["sector"],
+                    "cap": cap_class(u["sym"], caps, len(cache.get(u["sym"], {})))}
+                   for u in universe]
+            data["track"] = track.track_for_site(track.evaluate(track.read_picks(), cache, uni))
+        except Exception as e:                      # never lose the build over it
+            print("decisions / track record failed:", e)
+
+    save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation, build_flows(),
+                 post=add_decisions)
     print(f"Wrote {RS_DATA_JSON}")
     write_daily_report(os.path.join(HERE, "daily_report.html"),
                        meta, breadth, levels, ipo)

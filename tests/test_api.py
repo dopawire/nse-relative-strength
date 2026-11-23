@@ -132,3 +132,12 @@ def test_flows(client):
         assert ms == sorted(ms) and len(set(ms)) == len(ms)
         x = f["months"][-1]
         assert abs(x["fb"] - x["fs"] - x["fii"]) < 1 and abs(x["db"] - x["ds"] - x["dii"]) < 1
+
+
+def test_decide_and_track(client):
+    d = client.get("/api/decide").json()
+    if d:
+        assert d["regime"]["level"] in ("on", "mixed", "off")
+        assert isinstance(d["breakouts"], list) and len(d["focus"]) <= 3
+    t = client.get("/api/track").json()
+    assert isinstance(t, dict)

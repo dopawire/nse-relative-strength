@@ -23,6 +23,16 @@ notify() {
 
 if [ "${1:-}" = "--if-stale" ]; then
     if "$PY" audit_data.py --stale-only >/dev/null 2>&1; then
+        # prices are current — but NSE posts FII/DII between ~18:00 and 21:00,
+        # often after the build: pick it up on the hourly retries
+        out="$(timeout 120 "$PY" refresh_flows.py --if-behind --patch 2>&1)"
+        if printf '%s' "$out" | grep -q "rs_data.json updated"; then
+            printf '[%s] FII/DII caught up\n%s\n' "$(date '+%F %T')" "$out" >> run.log
+            if [ "${PUBLISH_SITE:-0}" = "1" ]; then
+                /bin/bash publish_site.sh >> run.log 2>&1 \
+                    && echo "[$(date '+%F %T')] site published" >> run.log
+            fi
+        fi
         echo "[$(date '+%F %T')] cron retry: data already current — skipping" >> run.log
         exit 0
     fi

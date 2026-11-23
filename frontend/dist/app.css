@@ -598,6 +598,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .dc-rules{margin:0;padding-left:18px;font-size:13px;color:var(--text-soft);line-height:1.75}
 .dc-rules b{color:var(--text);font-weight:600}
 .dc-empty{padding:14px;font-size:13px;color:var(--text-muted);background:var(--bg-inset);border-radius:var(--radius-sm)}
+.dc-hit{display:block;font-size:10.5px;color:var(--text-muted);margin-top:1px}
+.dc-track td:first-child{white-space:normal;max-width:300px;color:var(--text)}
+.dc-reg div{white-space:nowrap;line-height:1.7}
+.dc-reg i{font-style:normal;font-size:10.5px;color:var(--text-muted);margin-left:4px}
+.dc-live{font-size:10px;padding:0 5px;border-radius:6px;background:var(--accent-bg);color:var(--accent)}
+.dc-h3b{margin-top:16px!important}
 .dc-foot{margin-top:18px;font-size:11.5px;color:var(--text-muted);line-height:1.6}
 .dc .scan-table td:nth-child(2),.dc .scan-table th:nth-child(2),
 .dc .scan-table td:nth-child(3),.dc .scan-table th:nth-child(3),

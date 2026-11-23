@@ -251,3 +251,23 @@ def test_archived_stock_comes_back_with_its_classification(tmp_path, monkeypatch
     rc.add_stubs(master, _live(("LASA", "INE670X01014")), ["LASA"])
     assert master[0]["macro"] == "Healthcare" and rc.is_classified(master[0])
     assert _read(rc.DELISTED) == []                    # left the archive
+
+
+def test_find_bad_bars_only_flags_isolated_mismatches():
+    """A single wrong Yahoo close (neighbours agree with NSE) is flagged; an
+    adjusted history (every earlier bar scaled alike) and a missing bhavcopy
+    row are not."""
+    import build_rs as b
+    days = ["2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23"]
+    nse = {d: 100.0 + i for i, d in enumerate(days)}
+    cache = {"__BENCH__": {d: 1 for d in days},
+             "BAD": dict(nse), "ADJ": {d: v * 0.9 for d, v in nse.items()}, "THIN": dict(nse)}
+    cache["BAD"]["2026-11-20"] = nse["2026-11-19"]           # copy of the day before
+    cache["ADJ"]["2026-11-23"] = nse["2026-11-23"]           # ex-date today: older bars scaled
+    cache["THIN"]["2026-11-19"] = 50.0
+    bhav = {d: {"BAD": {"close": nse[d]}, "ADJ": {"close": nse[d]}} for d in days}
+
+    bad = b.find_bad_bars(cache, ["BAD", "ADJ", "THIN"], {}, bhav.get, sessions=4)
+    assert bad == {"2026-11-20": ["BAD"]}
+    # already recorded → not flagged again
+    assert b.find_bad_bars(cache, ["BAD"], {"BAD": {"2026-11-20": []}}, bhav.get, 4) == {}

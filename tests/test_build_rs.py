@@ -680,7 +680,7 @@ def test_new_listings_appear_in_every_level(rs_data):
 
 
 def test_rs_data_structure(rs_data):
-    assert set(rs_data) == {"meta", "breadth", "rotation", "flows", "levels"}
+    assert set(rs_data) >= {"meta", "breadth", "rotation", "flows", "levels"}
     assert rs_data["meta"]["n_stocks"] > 2000
     assert [lv["key"] for lv in rs_data["levels"]] == ["macro", "sector", "industry", "basic"]
     b = rs_data["breadth"]

@@ -178,6 +178,20 @@ def get_rotation():
     return {"dates": r.get("dates", []), "groups": r.get("groups", [])}
 
 
+@app.get("/api/decide")
+def get_decide():
+    """Focus / Swing decisions computed by the build (rs_engine.decide)."""
+    _check_ready()
+    return _data.get("decide") or {}
+
+
+@app.get("/api/track")
+def get_track():
+    """Track record of the Focus / Swing calls (rs_engine.track)."""
+    _check_ready()
+    return _data.get("track") or {}
+
+
 @app.get("/api/flows", response_model=FlowsResponse)
 def get_flows():
     """Monthly FII / DII net cash-market flows (NSE provisional, ₹ crore)."""
