@@ -42,6 +42,8 @@ class MemberOut(BaseModel):
     vr: float | None = None   # today's volume ÷ its 50-session average
     vd: float | None = None   # 10-session ÷ prior 50-session average volume
     tt: float | None = None   # 10-session high-low range, % of close
+    dl: float | None = None   # delivery % today (EQ series)
+    dla: float | None = None  # delivery %, 20-session average
     ev: str | None = None     # next corporate event within 14 days: "YYYY-MM-DD Results"
 
 

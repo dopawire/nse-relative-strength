@@ -1202,11 +1202,13 @@
   }
 
   // ---- SWING: what I'd check every evening ----------------------------------
-  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge' };
+  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge', dhi: 'High delivery', dlo: 'Weak delivery' };
   const TAG_TIP = {
     tight: '10-day range within 2.5 average daily ranges — a quiet base (ranked higher)',
     dry: '10-day volume below 85% of the prior 50 days — sellers drying up (ranked higher)',
     surge: 'today’s volume ≥ 1.5× average — buying this close is chasing; wait for a pause (ranked lower)',
+    dhi: '20-day average delivery ≥ 50% — steady buying into demat (breakouts ranked higher)',
+    dlo: 'today’s delivery below 80% of its average — more intraday churn than buying (breakouts ranked lower)',
   };
   // upcoming event within 14 days: results get the loud badge (gap risk)
   function evBadge(ev) {
@@ -1231,17 +1233,17 @@
     const leadInd = D.lead_ind.map(n => ind[n]).filter(Boolean);
 
     const table = (list, max, empty) => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
-      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Size</th><th>Price</th>
+      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
         <th title="RS rating 1-99 vs all stocks">RS</th><th>1W</th><th>1M</th>
         <th title="% below the 52-week high">Off high</th><th title="average daily range, 20 days — size the stop with it">ADR</th>
         <th title="average daily traded value, 20 sessions">₹ cr/day</th>
         <th title="10-session high-low range as % of price — small = a tight base">10d range</th>
-        <th title="today's volume ÷ its 50-session average">Vol ×</th><th>Setup</th></tr></thead>
+        <th title="today's volume ÷ its 50-session average">Vol ×</th>
+        <th title="delivery % today (20-session average) — share of traded quantity taken into demat">Deliv</th><th>Setup</th></tr></thead>
       <tbody>${list.slice(0, max).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
         <td class="tnum">${i + 1}</td>
-        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}</span>${evBadge(m.ev)}</td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)} · ${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}${evBadge(m.ev)}</span></td>
         <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
-        <td>${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}</td>
         <td class="tnum">${utils.fmtPrice(m.l)}</td>
         <td class="tnum"><b>${m.rr ?? '—'}</b></td>
         <td class="tnum">${tone(m.w1)}</td><td class="tnum">${tone(m.m1)}</td>
@@ -1250,6 +1252,7 @@
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
         <td class="tnum">${m.tt == null ? '—' : m.tt.toFixed(1) + '%'}</td>
         <td class="tnum">${m.vr == null ? '—' : m.vr.toFixed(1) + '×'}</td>
+        <td class="tnum">${m.dl == null ? '—' : `${m.dl.toFixed(0)}%<span class="dc-sub2">${m.dla == null ? '' : m.dla.toFixed(0) + '% avg'}</span>`}</td>
         <td>${((D.tags || {})[m.s] || []).map(t => `<span class="dc-tag t-${t}" title="${TAG_TIP[t]}">${TAG_WORD[t]}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="dc-empty">${empty}</div>`;
 
@@ -1275,7 +1278,7 @@
           <div class="dc-note">RS ≥ ${S.minRS}, above the 20/50/100/150/200-day EMAs, RS line above its 21-EMA, within ${S.maxOffHigh}% of the 52-week high,
             ADR ${S.minAdr}–${S.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${S.maxWeek}% this week or > ${S.maxMonth}% this month. ● = in a leading group (ranked first).
             Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).
-            Ranked higher when the 10-day range is <b>tight</b> and volume is <b>drying up</b>; a volume-surge day ranks lower
+            Ranked higher when the 10-day range is <b>tight</b>, volume is <b>drying up</b> and delivery is steadily high; a volume-surge or weak-delivery day ranks lower
             (in the backtest buying that close lagged). <span class="dc-ev res">⚠ Results</span> = reports within 14 days — don't hold through it.</div>
           ${table(breakouts, 25, 'No stock passes the breakout filter today — that itself says: stay patient.')}</section>
         <section class="dc-wide"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>

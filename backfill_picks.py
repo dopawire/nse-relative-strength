@@ -20,7 +20,7 @@ import json
 from bisect import bisect_right
 
 import build_rs as B
-from rs_engine import decide, flows, track
+from rs_engine import decide, delivery, flows, track
 from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, WINDOW
 from rs_engine.maths import index_trend
 
@@ -153,6 +153,7 @@ def iter_days(sessions):
         brd = json.load(f).get("breadth") or {}
     osc_by_day = dict(zip(brd.get("dates", []), brd.get("osc", [])))
     daily_flows = flows.read_csv(flows.DAILY, "date")
+    deliv = B.load_json_cache(delivery.DELIVERY_CACHE)
 
     stocks = [Stock(u, cache[u["sym"]], highs.get(u["sym"], {}), lows.get(u["sym"], {}),
                     vols.get(u["sym"], {}), bench)
@@ -168,6 +169,7 @@ def iter_days(sessions):
             n_sess = bisect_right(st.ds, day)
             r = st.record(day, window_start, B.cap_class(st.u["sym"], caps, n_sess))
             if r:
+                r.update(delivery.metrics(deliv.get(r["s"], {}), day))
                 recs.append(r)
                 sc = st.rr_score(r["_i"])
                 if sc is not None:

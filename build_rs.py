@@ -63,6 +63,7 @@ from rs_engine.flows import build_flows
 from rs_engine.decide import decide_from_rs_data
 from rs_engine import track
 from rs_engine.events import next_events, read_events
+from rs_engine import delivery
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -903,6 +904,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=No
                     "vr": m.get("vr"),        # volume ÷ 50-day average
                     "vd": m.get("vd"),        # 10-day ÷ prior 50-day volume (dry-up)
                     "tt": m.get("tt"),        # 10-day range % (tightness)
+                    "dl": m.get("dl"),        # delivery % today (EQ series)
+                    "dla": m.get("dla"),      # delivery %, 20-session average
                 })
                 if m.get("ev"):               # upcoming event: "YYYY-MM-DD Results"
                     members_out[-1]["ev"] = m["ev"]
@@ -1049,6 +1052,15 @@ def main():
     stock_cache = {}       # sym -> metrics (shared by all four levels)
     caps = read_cap_classes()
     upcoming = next_events(read_events(), ref_dates[-1])
+    deliv = load_json_cache(delivery.DELIVERY_CACHE)
+    if not args.html_only:            # NSE's delivery file (Indian IPs; best effort)
+        try:
+            added = delivery.update(deliv, ref_dates, _session())
+            if added:
+                write_json_atomic(delivery.DELIVERY_CACHE, deliv)
+                print(f"Delivery %: {len(added)} new session(s) from NSE")
+        except Exception as e:
+            print("delivery % update failed:", e)
     ratings = rs_ratings({u["sym"]: cache[u["sym"]] for u in universe
                           if cache.get(u["sym"])}, ref_dates[-1])
 
@@ -1085,7 +1097,8 @@ def main():
                       "cap": cap_class(sym, caps, len(ser)),
                       "ev": upcoming.get(sym),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
-                                      volumes.get(sym, {}), since=brk)}
+                                      volumes.get(sym, {}), since=brk),
+                      **delivery.metrics(deliv.get(sym, {}), ref_dates[-1])}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row

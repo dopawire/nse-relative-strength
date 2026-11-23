@@ -69,7 +69,11 @@ with:
   dry-up* (10-day volume < 85% of the prior 50) rank a stock higher, *Vol
   surge* (≥ 1.5×) ranks it lower — in the 250-session backtest tight, quiet
   candidates beat NIFTY 500 by +2.4% over 20 sessions vs +1.6% for all,
-  while buying the close of a surge day lagged (+1.2%).
+  while buying the close of a surge day lagged (+1.2%).  **Delivery %** (NSE
+  `sec_bhavdata_full`, EQ series; cache `~/.cache/nse-rs/.nse_delivery.json`)
+  shows today's and the 20-day average: steady 50%+ delivery nudges a
+  breakout up, a weak-delivery day nudges it down (a small effect in the
+  backtest, so a small weight; none for pullbacks, where it didn't help).
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and

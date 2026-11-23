@@ -182,6 +182,14 @@ def surge(m):
     return m.get("vr") is not None and m["vr"] >= 1.5
 
 
+def deliv_high(m):
+    return m.get("dla") is not None and m["dla"] >= 50
+
+
+def deliv_weak(m):
+    return m.get("dl") is not None and bool(m.get("dla")) and m["dl"] / m["dla"] < 0.8
+
+
 def setup_bonus(m):
     """Rank boost from the backtest (250 sessions, 20-day excess vs NIFTY 500):
     tight bases +2.4% vs +1.6% for all candidates, drying volume +1.9%, while
@@ -241,7 +249,10 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
            and _range_ok(m) and _liquid(m)
            and (m.get("w1") is None or m["w1"] <= S["maxWeek"])
            and (m.get("m1") is None or m["m1"] <= S["maxMonth"])]
-    brk.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 1.5 * m["h"] + setup_bonus(m)))
+    # delivery (breakouts only — no consistent effect on pullbacks): steady
+    # 50%+ delivery +1.9% vs +1.6% for all, a weak-delivery day +0.7%
+    brk.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 1.5 * m["h"] + setup_bonus(m)
+                             + 3 * deliv_high(m) - 4 * deliv_weak(m)))
     pb = [m for m in live if (m.get("rr") or 0) >= S["pbMinRS"] and above(m, 50) and above(m, 200)
           and has_ema(m, 20) and not above(m, 20) and m.get("h") is not None
           and S["pbOffHigh"][0] <= m["h"] <= S["pbOffHigh"][1] and _range_ok(m) and _liquid(m)]
@@ -266,7 +277,8 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
         "pullbacks": [m["s"] for m in pb],
         "extended": [m["s"] for m in ext][:N_EXTENDED],
         "rules": {k: list(v) if isinstance(v, tuple) else v for k, v in SWING.items()},
-        "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge)) if f(m)]
+        "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge),
+                                         ("dhi", deliv_high), ("dlo", deliv_weak)) if f(m)]
                  for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS]},
     }
 
