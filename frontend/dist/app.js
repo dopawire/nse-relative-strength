@@ -1202,6 +1202,12 @@
   }
 
   // ---- SWING: what I'd check every evening ----------------------------------
+  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge' };
+  const TAG_TIP = {
+    tight: '10-day range within 2.5 average daily ranges — a quiet base (ranked higher)',
+    dry: '10-day volume below 85% of the prior 50 days — sellers drying up (ranked higher)',
+    surge: 'today’s volume ≥ 1.5× average — buying this close is chasing; wait for a pause (ranked lower)',
+  };
   // upcoming event within 14 days: results get the loud badge (gap risk)
   function evBadge(ev) {
     if (!ev) return '';
@@ -1228,7 +1234,9 @@
       <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Size</th><th>Price</th>
         <th title="RS rating 1-99 vs all stocks">RS</th><th>1W</th><th>1M</th>
         <th title="% below the 52-week high">Off high</th><th title="average daily range, 20 days — size the stop with it">ADR</th>
-        <th title="average daily traded value, 20 sessions">₹ cr/day</th></tr></thead>
+        <th title="average daily traded value, 20 sessions">₹ cr/day</th>
+        <th title="10-session high-low range as % of price — small = a tight base">10d range</th>
+        <th title="today's volume ÷ its 50-session average">Vol ×</th><th>Setup</th></tr></thead>
       <tbody>${list.slice(0, max).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
         <td class="tnum">${i + 1}</td>
         <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}</span>${evBadge(m.ev)}</td>
@@ -1239,7 +1247,10 @@
         <td class="tnum">${tone(m.w1)}</td><td class="tnum">${tone(m.m1)}</td>
         <td class="tnum">${m.h == null ? '—' : m.h.toFixed(1) + '%'}</td>
         <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
-        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td></tr>`).join('')}</tbody></table></div>`
+        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
+        <td class="tnum">${m.tt == null ? '—' : m.tt.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.vr == null ? '—' : m.vr.toFixed(1) + '×'}</td>
+        <td>${((D.tags || {})[m.s] || []).map(t => `<span class="dc-tag t-${t}" title="${TAG_TIP[t]}">${TAG_WORD[t]}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div>`
       : `<div class="dc-empty">${empty}</div>`;
 
     const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
@@ -1264,7 +1275,8 @@
           <div class="dc-note">RS ≥ ${S.minRS}, above the 20/50/100/150/200-day EMAs, RS line above its 21-EMA, within ${S.maxOffHigh}% of the 52-week high,
             ADR ${S.minAdr}–${S.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${S.maxWeek}% this week or > ${S.maxMonth}% this month. ● = in a leading group (ranked first).
             Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).
-            <span class="dc-ev res">⚠ Results</span> = reports within 14 days — don't hold through it.</div>
+            Ranked higher when the 10-day range is <b>tight</b> and volume is <b>drying up</b>; a volume-surge day ranks lower
+            (in the backtest buying that close lagged). <span class="dc-ev res">⚠ Results</span> = reports within 14 days — don't hold through it.</div>
           ${table(breakouts, 25, 'No stock passes the breakout filter today — that itself says: stay patient.')}</section>
         <section class="dc-wide"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>
           <div class="dc-note">RS ≥ ${S.pbMinRS}, above the 50 and 200-day EMAs but back below the 20-day, ${S.pbOffHigh[0]}–${S.pbOffHigh[1]}% off the high.

@@ -54,6 +54,7 @@ from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs, period_return, avg_turnover_cr, index_trend,
+                             setup_metrics,
                              rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -899,6 +900,9 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=No
                     "cap": m.get("cap"),      # Large / Mid / Small / Micro / New
                     "tv": round(m["tv"], 2) if m.get("tv") is not None else None,
                     "rr": m.get("rr"),        # RS rating 1-99 (vs all stocks)
+                    "vr": m.get("vr"),        # volume ÷ 50-day average
+                    "vd": m.get("vd"),        # 10-day ÷ prior 50-day volume (dry-up)
+                    "tt": m.get("tt"),        # 10-day range % (tightness)
                 })
                 if m.get("ev"):               # upcoming event: "YYYY-MM-DD Results"
                     members_out[-1]["ev"] = m["ev"]
@@ -1079,7 +1083,9 @@ def main():
                       "tv": avg_turnover_cr(ser, volumes.get(sym, {}), 20),
                       "rr": ratings.get(sym),
                       "cap": cap_class(sym, caps, len(ser)),
-                      "ev": upcoming.get(sym)}
+                      "ev": upcoming.get(sym),
+                      **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
+                                      volumes.get(sym, {}), since=brk)}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row

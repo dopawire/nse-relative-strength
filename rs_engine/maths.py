@@ -241,3 +241,33 @@ def index_trend(closes_by_date):
             "m1": rnd(period_return(closes_by_date, 20)),
             "m3": rnd(period_return(closes_by_date, 63)),
             "off_high": round((1 - price / hi) * 100, 2) if hi else None}
+
+
+def setup_metrics(closes, highs, lows, volumes, since=None):
+    """Breakout-readiness gauges for one stock ({date: value} each):
+
+      vr  today's volume ÷ the 50 sessions before it   (≥ 1.5 = volume surge)
+      vd  10-session average volume ÷ the 50 before it  (< 0.85 = drying up)
+      tt  10-session high-low range as % of the close   (small = tight)
+
+    Zero-volume days count (an untraded day is real information).  None
+    where there isn't enough history (after `since`, a corporate-action
+    break, prices before it are a different security)."""
+    days = [d for d in sorted(closes) if d in volumes and (since is None or d >= since)]
+    out = {"vr": None, "vd": None, "tt": None}
+    if len(days) >= 31:
+        v = [volumes[d] for d in days]
+        prior = v[-51:-1]
+        avg = sum(prior) / len(prior)
+        out["vr"] = round(v[-1] / avg, 2) if avg > 0 else None
+        if len(days) >= 40:
+            base = v[-60:-10]
+            b = sum(base) / len(base)
+            out["vd"] = round(sum(v[-10:]) / 10 / b, 2) if b > 0 else None
+    hd = [d for d in sorted(highs) if d in lows and (since is None or d >= since)][-10:]
+    if len(hd) == 10 and closes:
+        last = closes[max(closes)]
+        hi, lo = max(highs[d] for d in hd), min(lows[d] for d in hd)
+        if last > 0 and hi >= lo > 0:
+            out["tt"] = round((hi - lo) / last * 100, 2)
+    return out

@@ -64,6 +64,12 @@ with:
   in the next 14 days carry a badge — **⚠ Results** in amber (results can gap
   a stock past any stop), dividends / splits / fund raising in grey — from
   NSE's event calendar (`refresh_events.py` → `nse_events.csv`, daily).
+  Each candidate shows its **10-day range**, today's **volume ×** its 50-day
+  average and setup tags: *Tight* (10-day range within 2.5 ADRs) and *Vol
+  dry-up* (10-day volume < 85% of the prior 50) rank a stock higher, *Vol
+  surge* (≥ 1.5×) ranks it lower — in the 250-session backtest tight, quiet
+  candidates beat NIFTY 500 by +2.4% over 20 sessions vs +1.6% for all,
+  while buying the close of a surge day lagged (+1.2%).
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and

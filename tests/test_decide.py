@@ -93,3 +93,28 @@ def test_evaluate_forward_returns():
     assert res["summary"][5]["brk_regime"]["on"]["hit"] == 1.0
     site = track.track_for_site(res)
     assert site["n"] == 1 and site["rows"][0]["h"]["5"]["brk"]["n"] == 1
+
+
+def test_setup_metrics():
+    from rs_engine.maths import setup_metrics
+    days = [f"2026-{m:02d}-{d:02d}" for m in (9, 10, 11) for d in range(1, 29)][:70]
+    closes = {d: 100.0 for d in days}
+    vols = {d: 1000 for d in days}
+    for d in days[-10:]:
+        vols[d] = 500                          # drying up
+    vols[days[-1]] = 3000                      # surge today
+    highs = {d: 101.0 for d in days}
+    lows = {d: 99.0 for d in days}
+    m = setup_metrics(closes, highs, lows, vols)
+    assert m["tt"] == 2.0                       # (101 - 99) / 100
+    assert m["vr"] > 2.5 and m["vd"] < 0.85
+    assert setup_metrics({}, {}, {}, {}) == {"vr": None, "vd": None, "tt": None}
+
+
+def test_setup_bonus_and_tags():
+    st = universe()
+    st.append(stock("TGT", "Alpha", rr=85, h=5.0, a=4.0) | {"tt": 6.0, "vd": 0.6, "vr": 0.5})
+    st.append(stock("CHASE", "Alpha", rr=85, h=5.0, a=4.0) | {"tt": 20.0, "vd": 1.6, "vr": 3.0})
+    d = decide.analyse(st)
+    assert d["breakouts"].index("TGT") < d["breakouts"].index("CHASE")
+    assert d["tags"]["TGT"] == ["tight", "dry"] and d["tags"]["CHASE"] == ["surge"]

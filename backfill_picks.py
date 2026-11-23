@@ -105,6 +105,23 @@ class Stock:
         vdays = [d for d in self.ds[max(0, i - 19):i + 1] if d in self.vol]
         tv = (sum(self.c[self.ds.index(d, max(0, i - 19))] * self.vol[d] for d in vdays)
               / len(vdays) / 1e7) if len(vdays) >= 10 else None
+        # breakout readiness (as maths.setup_metrics)
+        vr = vd = tt = None
+        vi = [d for d in self.ds[max(0, i - 59):i + 1] if d in self.vol and d >= since]
+        if len(vi) >= 31:
+            v = [self.vol[d] for d in vi]
+            prior = v[-51:-1]
+            avg = sum(prior) / len(prior)
+            vr = round(v[-1] / avg, 2) if avg > 0 else None
+            if len(vi) >= 40:
+                base = v[-60:-10]
+                bb = sum(base) / len(base)
+                vd = round(sum(v[-10:]) / 10 / bb, 2) if bb > 0 else None
+        hd = [d for d in self.ds[max(0, i - 9):i + 1] if d in self.hi and d in self.lo and d >= since]
+        if len(hd) == 10:
+            hi_v, lo_v = max(self.hi[d] for d in hd), min(self.lo[d] for d in hd)
+            if price > 0 and hi_v >= lo_v > 0:
+                tt = round((hi_v - lo_v) / price * 100, 2)
         nw = None
         if self.ds[0] > window_start:
             nw = len([d for d in self.ds[:i + 1] if d >= window_start])
@@ -112,7 +129,7 @@ class Stock:
                 "industry": self.u["industry"], "cap": cap,
                 "e": e, "b": rse, "h": h, "a": a, "l": price, "nw": nw,
                 "m1": self.ret(i, 20), "m3": self.ret(i, 63), "w1": self.ret(i, 5),
-                "tv": tv, "_i": i}
+                "tv": tv, "vr": vr, "vd": vd, "tt": tt, "_i": i}
 
     def rr_score(self, i):
         if i <= 63:
@@ -122,11 +139,9 @@ class Stock:
         return 2 * r[0] + r[1] + r[2] + r[3]
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--sessions", type=int, default=250)
-    args = ap.parse_args()
-
+def iter_days(sessions):
+    """Yield (day, stock records, decisions) for each of the last `sessions`
+    sessions with enough history, as the live build would have seen them."""
     cache = B.load_json_cache(B.PRICE_CACHE)
     highs = B.load_json_cache(B.HIGH_CACHE)
     lows = B.load_json_cache(B.LOW_CACHE)
@@ -143,9 +158,7 @@ def main():
                     vols.get(u["sym"], {}), bench)
               for u in universe if cache.get(u["sym"])]
     bdates = sorted(bench)
-    days = bdates[-args.sessions:]
-    done = 0
-    for day in days:
+    for day in bdates[-sessions:]:
         k = bdates.index(day)
         if k < WINDOW + 252:
             continue                                  # too little history before it
@@ -172,9 +185,19 @@ def main():
                if month_days and all(d in daily_flows for d in month_days) else None)
         dec = decide.analyse(recs, mk, osc, fii)
         dec["asof"] = day
+        yield day, recs, dec
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sessions", type=int, default=250)
+    args = ap.parse_args()
+    done = total = 0
+    for _day, _recs, dec in iter_days(args.sessions):
+        total += 1
         if track.save_pick(track.pick_record(dec, backtest=True)):
             done += 1
-    print(f"backfilled {done} of {len(days)} sessions → {track.PICKS}")
+    print(f"backfilled {done} of {total} sessions → {track.PICKS}")
 
 
 if __name__ == "__main__":

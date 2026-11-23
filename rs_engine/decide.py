@@ -169,6 +169,26 @@ def _range_ok(m):
     return m.get("a") is not None and SWING["minAdr"] <= m["a"] <= SWING["maxAdr"]
 
 
+def tight(m):
+    """10-session range within 2.5 average daily ranges: a quiet base."""
+    return m.get("tt") is not None and bool(m.get("a")) and m["tt"] <= 2.5 * m["a"]
+
+
+def drying(m):
+    return m.get("vd") is not None and m["vd"] < 0.85
+
+
+def surge(m):
+    return m.get("vr") is not None and m["vr"] >= 1.5
+
+
+def setup_bonus(m):
+    """Rank boost from the backtest (250 sessions, 20-day excess vs NIFTY 500):
+    tight bases +2.4% vs +1.6% for all candidates, drying volume +1.9%, while
+    buying the close of a volume-surge day lagged (+1.2%) — that's chasing."""
+    return 8 * tight(m) + 4 * drying(m) - 4 * surge(m)
+
+
 def _strip(row):
     """Group row without its member list, rounded for the JSON."""
     out = {k: (round(v, 2) if isinstance(v, float) else v)
@@ -221,11 +241,11 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
            and _range_ok(m) and _liquid(m)
            and (m.get("w1") is None or m["w1"] <= S["maxWeek"])
            and (m.get("m1") is None or m["m1"] <= S["maxMonth"])]
-    brk.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 1.5 * m["h"]))
+    brk.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 1.5 * m["h"] + setup_bonus(m)))
     pb = [m for m in live if (m.get("rr") or 0) >= S["pbMinRS"] and above(m, 50) and above(m, 200)
           and has_ema(m, 20) and not above(m, 20) and m.get("h") is not None
           and S["pbOffHigh"][0] <= m["h"] <= S["pbOffHigh"][1] and _range_ok(m) and _liquid(m)]
-    pb.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 0.5 * m["h"]))
+    pb.sort(key=lambda m: -(m["rr"] + (10 if in_lead(m) else 0) - 0.5 * m["h"] + setup_bonus(m)))
     ext = [m for m in live if (m.get("rr") or 0) >= S["minRS"] and _liquid(m)
            and ((m.get("w1") or 0) > 20 or (m.get("m1") or 0) > S["maxMonth"])]
     ext.sort(key=lambda m: -(m.get("w1") or 0))
@@ -246,6 +266,8 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
         "pullbacks": [m["s"] for m in pb],
         "extended": [m["s"] for m in ext][:N_EXTENDED],
         "rules": {k: list(v) if isinstance(v, tuple) else v for k, v in SWING.items()},
+        "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge)) if f(m)]
+                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS]},
     }
 
 
