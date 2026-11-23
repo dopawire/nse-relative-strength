@@ -141,3 +141,13 @@ def test_decide_and_track(client):
         assert isinstance(d["breakouts"], list) and len(d["focus"]) <= 3
     t = client.get("/api/track").json()
     assert isinstance(t, dict)
+
+
+def test_watchlist_roundtrip(client, tmp_path, monkeypatch):
+    import watchlist
+    monkeypatch.setattr(watchlist, "WATCHLIST", str(tmp_path / "wl.txt"))
+    assert client.get("/api/watchlist").json() == {"symbols": []}
+    r = client.put("/api/watchlist", json={"symbols": ["tcs", "INFY", "TCS"]})
+    assert r.json() == {"symbols": ["TCS", "INFY"]}
+    assert client.get("/api/watchlist").json() == {"symbols": ["TCS", "INFY"]}
+    assert client.put("/api/watchlist", json={"symbols": ["X"] * 501}).status_code == 400

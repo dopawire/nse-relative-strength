@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from rs_engine.config import WINDOW, BENCHMARK_NAME
 from backend.models import (
     MetaResponse, LevelSummary, LevelResponse,
-    GroupOut, BreadthResponse, RotationResponse, StockDetail, FlowsResponse,
+    GroupOut, BreadthResponse, RotationResponse, StockDetail, FlowsResponse, WatchlistIn,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -190,6 +190,27 @@ def get_track():
     """Track record of the Focus / Swing calls (rs_engine.track)."""
     _check_ready()
     return _data.get("track") or {}
+
+
+def _watchlist():
+    if ROOT not in sys.path:
+        sys.path.insert(0, ROOT)
+    import watchlist
+    return watchlist
+
+
+@app.get("/api/watchlist")
+def get_watchlist():
+    """Starred symbols the evening brief alerts on (~/.config/nse-rs/watchlist.txt)."""
+    return {"symbols": _watchlist().read()}
+
+
+@app.put("/api/watchlist")
+def put_watchlist(body: WatchlistIn):
+    """Replace the alert watchlist with the site's ☆ list."""
+    if len(body.symbols) > 500:
+        raise HTTPException(400, detail="too many symbols")
+    return {"symbols": _watchlist().write(body.symbols)}
 
 
 @app.get("/api/flows", response_model=FlowsResponse)

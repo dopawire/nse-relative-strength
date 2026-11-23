@@ -81,6 +81,15 @@ with:
   each regime.  `backfill_picks.py` rebuilt the year before live logging from
   price history with the same rules (marked as such).  The rules live in
   `rs_engine/decide.py`, so the pages, the log and the brief always agree.
+- **Evening Telegram brief** (`send_brief.py`, after each build) — the Focus
+  answer, regime, top breakouts / pullbacks with results warnings, FII / DII
+  and the track record, plus **watchlist alerts** for your ☆ stocks: entered
+  the breakout / pullback list, crossed the 20-day EMA, 52-week high, results
+  ahead.  Stars on the local site sync to `~/.config/nse-rs/watchlist.txt`
+  (outside the public repo; editable by hand).  Setup: message @BotFather →
+  `/newbot` → token; message your bot; `TELEGRAM_BOT_TOKEN=… python
+  send_brief.py --chat-id`; put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in
+  `~/.config/nse-rs/notify.env`.  `--dry-run` prints the message.
 - A printable **daily digest** (`daily_report.html`) after every build.
 
 ## Method
@@ -140,6 +149,8 @@ with:
 | `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
 | `backfill_picks.py` | Rebuild past Focus / Swing calls from price history into `nse_picks.jsonl` (one-off; live builds log each day). |
 | `refresh_events.py` | Update `nse_events.csv` — NSE board meetings (results, dividends, splits…) for the next 30 days. Best effort. |
+| `send_brief.py` | Evening Telegram brief + watchlist alerts (once per session; no-op without a bot token). |
+| `watchlist.py` | Watchlist file + alert rules for the brief. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000` (`NSE_RS_HOST=0.0.0.0` to expose it on the LAN). |

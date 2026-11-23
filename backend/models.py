@@ -91,6 +91,10 @@ class RotationResponse(BaseModel):
     groups: list[RotationGroup] = []
 
 
+class WatchlistIn(BaseModel):
+    symbols: list[str] = []
+
+
 class FlowMonth(BaseModel):
     m: str                 # YYYY-MM
     fb: float              # FII gross buy (₹ crore)

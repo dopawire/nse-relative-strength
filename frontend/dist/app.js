@@ -1763,10 +1763,33 @@
     if (state.watchlist.has(sym)) state.watchlist.delete(sym);
     else state.watchlist.add(sym);
     localStorage.setItem('rs_watchlist', JSON.stringify([...state.watchlist]));
+    syncWatchlist();
     document.querySelectorAll(`.wstar[data-sym="${CSS.escape(sym)}"]`).forEach(b => {
       b.classList.toggle('on', state.watchlist.has(sym));
       b.textContent = state.watchlist.has(sym) ? '★' : '☆';
     });
+  }
+
+  // Local server: mirror the stars to ~/.config/nse-rs/watchlist.txt so the
+  // evening Telegram brief can alert on them (the static site can't).
+  function syncWatchlist() {
+    if (staticData) return;
+    fetch('/api/watchlist', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: [...state.watchlist] }) }).catch(() => {});
+  }
+  async function mergeServerWatchlist() {
+    if (staticData) return;
+    try {
+      const r = await fetch('/api/watchlist');
+      if (!r.ok) return;
+      const server = (await r.json()).symbols || [];
+      const before = state.watchlist.size;
+      server.forEach(s => state.watchlist.add(s));
+      if (state.watchlist.size !== before) {
+        localStorage.setItem('rs_watchlist', JSON.stringify([...state.watchlist]));
+      }
+      if (state.watchlist.size !== server.length) syncWatchlist();
+    } catch (e) { /* older server without /api/watchlist */ }
   }
 
   // ---- CSV export of the current level tab ----
@@ -2224,6 +2247,7 @@
     // Boot the API — falls back to rs_data.json on the static export
     try {
       await bootApi();
+      await mergeServerWatchlist();
     } catch (e) {
       $.content.innerHTML = `<div class="brd-empty">Failed to load data.<br><br><code>${utils.esc(e.message)}</code></div>`;
       return;
