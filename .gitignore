@@ -19,3 +19,4 @@ run.log
 .claude/
 .DS_Store
 .build.lock
+.coverage

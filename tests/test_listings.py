@@ -271,3 +271,16 @@ def test_find_bad_bars_only_flags_isolated_mismatches():
     assert bad == {"2026-11-20": ["BAD"]}
     # already recorded → not flagged again
     assert b.find_bad_bars(cache, ["BAD"], {"BAD": {"2026-11-20": []}}, bhav.get, 4) == {}
+
+
+def test_purge_off_session_bars():
+    """Holiday carry-forward / Sunday-session bars are dropped from stocks so
+    a 1M return spans 20 market sessions, not 20 bars."""
+    import build_rs as b
+    sessions = {"2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10"}
+    cache = {"A": {"2026-11-05": 1, "2026-11-06": 1, "2026-11-08": 1, "2026-11-09": 1},
+             "B": {"2026-11-09": 2, "2026-11-10": 2}, "OLD": {"2026-01-01": 5}}
+    highs = {"A": {"2026-11-08": 1}}
+    out = b.purge_off_session(cache, highs, {}, {}, ["A", "B", "OLD"], sessions)
+    assert out == {"A": 1} and "2026-11-08" not in cache["A"] and highs["A"] == {}
+    assert cache["OLD"] == {"2026-01-01": 5}          # before the calendar starts: untouched

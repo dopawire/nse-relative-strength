@@ -118,3 +118,28 @@ def test_setup_bonus_and_tags():
     d = decide.analyse(st)
     assert d["breakouts"].index("TGT") < d["breakouts"].index("CHASE")
     assert d["tags"]["TGT"] == ["tight", "dry"] and d["tags"]["CHASE"] == ["surge"]
+
+
+def test_decide_from_rs_data_joins_levels_and_flows():
+    def mem(s, **kw):
+        base = {"s": s, "n": s, "rr": 90, "m1": 10.0, "m3": 20.0, "w1": 1.0, "e": [1, 1, 1, 1, 1],
+                "b": 1, "h": 2.0, "a": 4.0, "tv": 50.0, "l": 500.0, "cap": "Large"}
+        return base | kw
+    ms = [mem(f"A{i}") for i in range(6)]
+    data = {
+        "meta": {"window_dates": ["2026-11-20", "2026-11-23"]},
+        "levels": [{"key": "macro", "groups": [{"name": "M", "members": ms}]},
+                   {"key": "sector", "groups": [{"name": "Alpha", "pct": 0.9, "members": ms}]},
+                   {"key": "industry", "groups": [{"name": "Alpha ind", "pct": 0.8, "members": ms}]},
+                   {"key": "basic", "groups": [{"name": "B", "members": ms}]}],
+        "breadth": {"osc": [1, 2, 3, 4, 5, 6], "market": {"ema": [1, 1, 1, 1, 1]}},
+        "flows": {"months": [{"m": "2026-10", "fii": -5.0}, {"m": "2026-11", "fii": 7.0}]},
+    }
+    d = decide.decide_from_rs_data(data)
+    assert d["asof"] == "2026-11-23"
+    assert d["sectors"][0]["name"] == "Alpha" and d["sectors"][0]["pct"] == 90.0
+    fii = [c for c in d["regime"]["checks"] if c["t"].startswith("FIIs")][0]
+    assert fii["ok"] is True
+    data["flows"]["months"].pop()                 # only last month's flow → not this month's
+    fii = [c for c in decide.decide_from_rs_data(data)["regime"]["checks"] if c["t"].startswith("FIIs")][0]
+    assert fii["ok"] is None

@@ -20,7 +20,7 @@ import json
 from bisect import bisect_right
 
 import build_rs as B
-from rs_engine import decide, delivery, flows, track
+from rs_engine import decide, flows, nse_archive, track
 from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, WINDOW
 from rs_engine.maths import index_trend
 
@@ -63,15 +63,25 @@ class Stock:
                     last = i
             self.brk.append(last)
 
-    def ret(self, i, n):
-        if i - n < 0:
+    def ret(self, i, start):
+        """% from the close on or before market session `start` to bar i
+        (maths.period_return with a calendar)."""
+        if start is None:
+            return None
+        j = bisect_right(self.ds, start) - 1
+        if j < 0 or j >= i:
             return None
         b = self.brk[i]
-        if b is not None and b > i - n:
+        if b is not None and b > j:
             return None
-        return (self.c[i] / self.c[i - n] - 1) * 100
+        return (self.c[i] / self.c[j] - 1) * 100
 
-    def record(self, day, window_start, cap):
+    def record(self, day, window_start, cap, cal=None, k=None):
+        """Metrics as of `day`; `cal[:k + 1]` = the market sessions up to it."""
+        def sess(n):
+            if cal is None:
+                return self.ds[i - n] if i - n >= 0 else None
+            return cal[k - n] if k - n >= 0 else None
         i = bisect_right(self.ds, day) - 1
         if i < 1 or self.ds[i] != day:
             return None                              # no bar that day
@@ -87,9 +97,9 @@ class Stock:
         rse = -1
         if j >= 20 and self.rs_i[j] == i and self.rs_ema[j] is not None and not recent_break:
             rse = 1 if self.ratios[j] >= self.rs_ema[j] else 0
-        lo_day = self.ds[max(0, i - 251)]
-        since = self.ds[b] if recent_break else lo_day
-        hs = [self.hi[d] for d in self.ds[max(0, i - 251):i + 1]
+        lo_day = sess(251) or self.ds[0]
+        since = max(self.ds[b], lo_day) if recent_break else lo_day
+        hs = [self.hi[d] for d in self.ds[max(0, i - 400):i + 1]
               if d in self.hi and d >= since]
         h = (max(hs) - price) / max(hs) * 100 if hs and max(hs) > 0 else None
         ratios = []
@@ -128,7 +138,7 @@ class Stock:
         return {"s": self.u["sym"], "n": self.u["name"], "sector": self.u["sector"],
                 "industry": self.u["industry"], "cap": cap,
                 "e": e, "b": rse, "h": h, "a": a, "l": price, "nw": nw,
-                "m1": self.ret(i, 20), "m3": self.ret(i, 63), "w1": self.ret(i, 5),
+                "m1": self.ret(i, sess(20)), "m3": self.ret(i, sess(63)), "w1": self.ret(i, sess(5)),
                 "tv": tv, "vr": vr, "vd": vd, "tt": tt, "_i": i}
 
     def rr_score(self, i):
@@ -153,7 +163,7 @@ def iter_days(sessions):
         brd = json.load(f).get("breadth") or {}
     osc_by_day = dict(zip(brd.get("dates", []), brd.get("osc", [])))
     daily_flows = flows.read_csv(flows.DAILY, "date")
-    deliv = B.load_json_cache(delivery.DELIVERY_CACHE)
+    arc = B.load_json_cache(nse_archive.ARCHIVE)
 
     stocks = [Stock(u, cache[u["sym"]], highs.get(u["sym"], {}), lows.get(u["sym"], {}),
                     vols.get(u["sym"], {}), bench)
@@ -167,9 +177,9 @@ def iter_days(sessions):
         recs, scores = [], {}
         for st in stocks:
             n_sess = bisect_right(st.ds, day)
-            r = st.record(day, window_start, B.cap_class(st.u["sym"], caps, n_sess))
+            r = st.record(day, window_start, B.cap_class(st.u["sym"], caps, n_sess), bdates, k)
             if r:
-                r.update(delivery.metrics(deliv.get(r["s"], {}), day))
+                r.update(nse_archive.delivery_metrics(arc.get(r["s"]), day))
                 recs.append(r)
                 sc = st.rr_score(r["_i"])
                 if sc is not None:

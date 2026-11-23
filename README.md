@@ -70,7 +70,7 @@ with:
   surge* (≥ 1.5×) ranks it lower — in the 250-session backtest tight, quiet
   candidates beat NIFTY 500 by +2.4% over 20 sessions vs +1.6% for all,
   while buying the close of a surge day lagged (+1.2%).  **Delivery %** (NSE
-  `sec_bhavdata_full`, EQ series; cache `~/.cache/nse-rs/.nse_delivery.json`)
+  `sec_bhavdata_full`, EQ series; from the NSE daily archive below)
   shows today's and the 20-day average: steady 50%+ delivery nudges a
   breakout up, a weak-delivery day nudges it down (a small effect in the
   backtest, so a small weight; none for pullbacks, where it didn't help).
@@ -130,6 +130,21 @@ with:
   counted in the running month when Kotak hasn't caught up.  NSE posts the
   day's figures between ~18:00 and 21:00, so the hourly catch-up runs also
   fetch them and patch `rs_data.json` without a full rebuild.
+- **NSE daily archive → official prices** (`rs_engine/nse_archive.py`,
+  cache `~/.cache/nse-rs/.nse_archive.json`, last 300 sessions of NSE's
+  `sec_bhavdata_full`: close, high, low, quantity, delivery).  Every build
+  rebuilds each stock's archived sessions from NSE's own prices and keeps
+  Yahoo's adjustment only across genuine corporate actions (a clean ≥ 7%
+  factor step where NSE's raw price made the move).  This fixes Yahoo's
+  *partial* split / bonus adjustments (TRENT's 1:2 bonus was adjusted only
+  back to 1-Jan-2026, leaving a fake −33% day; SILVERTUC a fake −90%), stale
+  or wrong bars, and history Yahoo lacks (≈220 stocks start at Yahoo on
+  18-Aug-2026 but traded on NSE for months).  Untraded sessions carry NSE's
+  last close.  Idempotent; a no-op when NSE is unreachable (cloud runner).
+- **Market sessions only:** stock bars on non-session days (Yahoo's holiday
+  carry-forwards, the Sunday Muhurat hour) are dropped, and 1W / 1M / 3M
+  returns and the 52-week high count market sessions — a stock that skipped
+  days isn't measured over a longer stretch.
 - **Wrong single bars:** Yahoo occasionally serves a bad close for a thin
   stock on one day (SAPPL 20-Nov-2026: 318.40 vs NSE's 330.00).  Each build
   compares the last 5 sessions with the bhavcopy and replaces a close that

@@ -63,7 +63,7 @@ from rs_engine.flows import build_flows
 from rs_engine.decide import decide_from_rs_data
 from rs_engine import track
 from rs_engine.events import next_events, read_events
-from rs_engine import delivery
+from rs_engine import nse_archive
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -483,6 +483,28 @@ def purge_flat_carries(cache, highs, lows, have):
         write_json_atomic(LOW_CACHE, lows)
         print(f"Purged flat Yahoo carry-bars on {len(purged)} day(s): {purged}")
     return purged
+
+
+def purge_off_session(cache, highs, lows, volumes, syms, sessions):
+    """Drop stock bars on days that aren't market sessions — Yahoo's
+    carry-forward bars on holidays (1-May, 28-May, 26-Jun, 14-Sep-2026) and
+    the Sunday Muhurat hour.  An extra bar shifts a stock's 1W / 1M / 3M
+    window by a day and nudges its EMAs.  `sessions` = the benchmark's
+    dates after gap-filling (a day ≥ half the stocks traded is in it).
+    → {sym: n_dropped}."""
+    first = min(sessions) if sessions else None
+    out = {}
+    for s in syms:
+        bad = [d for d in cache.get(s, {}) if d not in sessions and first and d >= first]
+        if not bad:
+            continue
+        for st in (cache, highs, lows, volumes):
+            v = st.get(s)
+            if v:
+                for d in bad:
+                    v.pop(d, None)
+        out[s] = len(bad)
+    return out
 
 
 def repair_intraday_gap(cache, highs, lows, have, thresh, today=None, prov=None):
@@ -1009,6 +1031,30 @@ def main():
         purged = purge_flat_carries(cache, highs, lows, have)
         fill_stock_gaps(cache, highs, lows, have, extra_days=purged,
                         recheck=args.recheck)
+
+    # NSE's official daily file: fixes Yahoo's partial split adjustments,
+    # fills history Yahoo lacks, and carries delivery % (rs_engine/nse_archive)
+    arc = load_json_cache(nse_archive.ARCHIVE)
+    if not args.html_only:
+        try:
+            got = nse_archive.update(arc, sorted(bench)[-nse_archive.KEEP_SESSIONS:], _session())
+            if got:
+                write_json_atomic(nse_archive.ARCHIVE, arc)
+                print(f"NSE daily archive: {len(got)} new session(s)")
+        except Exception as e:
+            print("NSE daily archive update failed:", e)
+    rb = nse_archive.rebase(cache, highs, lows, arc, have, volumes, sessions=bench)
+    if rb["changed"] or rb["added"]:
+        if rb["changed"]:
+            worst = sorted(rb["changed"].items(), key=lambda kv: -kv[1])[:5]
+            print(f"Rebased on NSE's official prices: {len(rb['changed'])} stock(s) corrected "
+                  f"(largest: " + ", ".join(f"{s} {v}%" for s, v in worst) + ")")
+        if rb["added"]:
+            print(f"Sessions from NSE that Yahoo lacks: {len(rb['added'])} stock(s), "
+                  f"{sum(rb['added'].values())} sessions")
+        for path, obj in ((PRICE_CACHE, cache), (HIGH_CACHE, highs), (LOW_CACHE, lows),
+                          (VOLUME_CACHE, volumes)):
+            write_json_atomic(path, obj)
     # Always persist the sidecar (empty = every bar came from Yahoo) so audit
     # checks and fresh runners see the file.
     write_json_atomic(PROVENANCE, prov)
@@ -1029,6 +1075,13 @@ def main():
         for d, m in _filled:
             prov[d] = m
         write_json_atomic(PROVENANCE, prov)
+    off = purge_off_session(cache, highs, lows, volumes, have, set(bench))
+    if off:
+        print(f"Dropped {sum(off.values())} bar(s) on non-session days (holiday "
+              f"carry-forwards / special sessions) from {len(off)} stock(s)")
+        for path, obj in ((PRICE_CACHE, cache), (HIGH_CACHE, highs), (LOW_CACHE, lows),
+                          (VOLUME_CACHE, volumes)):
+            write_json_atomic(path, obj)
     covered = [d for d in bench_dates
                if sum(1 for s in have if d in cache[s]) >= thresh]
     ref_dates = (covered or bench_dates)[-WINDOW:]
@@ -1052,15 +1105,10 @@ def main():
     stock_cache = {}       # sym -> metrics (shared by all four levels)
     caps = read_cap_classes()
     upcoming = next_events(read_events(), ref_dates[-1])
-    deliv = load_json_cache(delivery.DELIVERY_CACHE)
-    if not args.html_only:            # NSE's delivery file (Indian IPs; best effort)
-        try:
-            added = delivery.update(deliv, ref_dates, _session())
-            if added:
-                write_json_atomic(delivery.DELIVERY_CACHE, deliv)
-                print(f"Delivery %: {len(added)} new session(s) from NSE")
-        except Exception as e:
-            print("delivery % update failed:", e)
+    # market-session calendar up to the window end: returns and the 52-week
+    # high count sessions, not a stock's own bars (illiquid stocks skip days)
+    cal = [d for d in sorted(bench) if d <= ref_dates[-1]]
+    year_start = cal[-252] if len(cal) >= 252 else cal[0]
     ratings = rs_ratings({u["sym"]: cache[u["sym"]] for u in universe
                           if cache.get(u["sym"])}, ref_dates[-1])
 
@@ -1087,18 +1135,19 @@ def main():
                       "rs": srs, "pct": percentrank_inc(srs, srs[-1]),
                       "ema": ef, "ltp": price,
                       "rse": rs_ema_flag(post, bench),
-                      "hi52": pct_off_high(highs.get(sym, {}), price, since=brk),
+                      "hi52": pct_off_high(highs.get(sym, {}), price,
+                                           since=max(brk or "", year_start)),
                       "adr": adr_pct(highs.get(sym, {}), lows.get(sym, {}), since=brk),
                       "new": new,
-                      "m1": period_return(ser, 20), "m3": period_return(ser, 63),
-                      "d1": period_return(ser, 1), "w1": period_return(ser, 5),
+                      "m1": period_return(ser, 20, cal), "m3": period_return(ser, 63, cal),
+                      "d1": period_return(ser, 1, cal), "w1": period_return(ser, 5, cal),
                       "tv": avg_turnover_cr(ser, volumes.get(sym, {}), 20),
                       "rr": ratings.get(sym),
                       "cap": cap_class(sym, caps, len(ser)),
                       "ev": upcoming.get(sym),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
                                       volumes.get(sym, {}), since=brk),
-                      **delivery.metrics(deliv.get(sym, {}), ref_dates[-1])}
+                      **nse_archive.delivery_metrics(arc.get(sym), ref_dates[-1])}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row

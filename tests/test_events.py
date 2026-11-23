@@ -32,3 +32,33 @@ def test_merge_keeps_recent_past_and_replaces_future(tmp_path):
     p = str(tmp_path / "ev.csv")
     events.write_events(out, p)
     assert events.read_events(p) == out
+
+
+def test_refresh_events_main(tmp_path, monkeypatch):
+    import datetime as dt
+    import refresh_events as re_
+    from rs_engine.config import IST
+    d1 = dt.datetime.now(IST).date() + dt.timedelta(days=7)
+    d2 = d1 + dt.timedelta(days=1)
+
+    class R:
+        status_code = 200
+
+        def __init__(self, rows):
+            self.rows = rows
+
+        def json(self):
+            return self.rows
+
+    class S:
+        headers = {}
+
+        def get(self, url, timeout):
+            if "board-meetings" in url:
+                return R([{"bm_symbol": "AAA", "bm_date": d1.strftime("%d-%b-%Y"), "bm_purpose": "Financial Results"}])
+            return R([{"symbol": "BBB", "date": d2.strftime("%d-%b-%Y"), "purpose": "Dividend"}])
+    monkeypatch.setattr(events, "EVENTS", str(tmp_path / "ev.csv"))
+    monkeypatch.setattr(re_.requests, "Session", S)
+    assert re_.main() == 0
+    ev = events.read_events()
+    assert ev[("AAA", d1.isoformat())] == "Results" and ev[("BBB", d2.isoformat())] == "Dividend"

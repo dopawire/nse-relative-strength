@@ -81,3 +81,27 @@ def test_csv_roundtrip_and_series(tmp_path):
     assert [r["m"] for r in rows] == ["2026-10", "2026-11"]
     assert rows[0]["fii"] == -5 and rows[0]["to"] is None
     assert rows[1]["to"] == "2026-11-19" and rows[1]["dii"] == -1
+
+
+def test_refresh_flows_main_patches_rs_data(tmp_path, monkeypatch):
+    """End to end with the network mocked: CSVs written, rs_data.json patched,
+    and --if-behind does nothing once the latest session is recorded."""
+    import json
+    import sys
+    import refresh_flows as rf
+    monkeypatch.setattr(flows, "MONTHLY", str(tmp_path / "m.csv"))
+    monkeypatch.setattr(flows, "DAILY", str(tmp_path / "d.csv"))
+    monkeypatch.setattr(rf, "RS_DATA", str(tmp_path / "rs.json"))
+    (tmp_path / "rs.json").write_text(json.dumps({"meta": {}, "flows": {}}))
+    km = _kotak_months()
+    monkeypatch.setattr(rf, "fetch_kotak", lambda: (km, {f"{max(km)}-03": _rec(10, 5)}))
+    monkeypatch.setattr(rf, "fetch_nse", lambda: {})
+    monkeypatch.setattr(sys, "argv", ["refresh_flows.py", "--patch"])
+    assert rf.main() == 0
+    got = json.loads((tmp_path / "rs.json").read_text())["flows"]
+    assert len(got["months"]) == flows.MIN_MONTHS and got["asof"] == f"{max(km)}-03"
+    import rs_engine.config as cfg
+    monkeypatch.setattr(cfg, "latest_session", lambda now=None: "2000-01-01")
+    monkeypatch.setattr(rf, "fetch_kotak", lambda: (_ for _ in ()).throw(AssertionError("fetched")))
+    monkeypatch.setattr(sys, "argv", ["refresh_flows.py", "--if-behind"])
+    assert rf.main() == 0                          # already current: no fetch
