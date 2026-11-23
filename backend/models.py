@@ -39,6 +39,7 @@ class MemberOut(BaseModel):
     cap: str | None = None    # Large / Mid / Small / Micro / New (size class)
     tv: float | None = None   # avg daily traded value, last 20 sessions (₹ crore)
     rr: int | None = None     # RS rating 1-99 vs all stocks (weighted 12M performance)
+    ev: str | None = None     # next corporate event within 14 days: "YYYY-MM-DD Results"
 
 
 class GroupOut(BaseModel):

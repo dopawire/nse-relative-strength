@@ -45,6 +45,9 @@ echo "[$(date '+%F %T')] refresh_classification.py" >> run.log
 timeout 900 "$PY" refresh_classification.py >> run.log 2>&1 \
     || echo "[$(date '+%F %T')] listing refresh failed (rc=$?) — continuing" >> run.log
 
+# upcoming results / corporate events (best effort)
+timeout 120 "$PY" refresh_events.py >> run.log 2>&1 || true
+
 # FII / DII cash flows (best effort: the files keep their history on failure)
 echo "[$(date '+%F %T')] refresh_flows.py" >> run.log
 timeout 120 "$PY" refresh_flows.py >> run.log 2>&1 \

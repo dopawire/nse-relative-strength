@@ -1202,6 +1202,15 @@
   }
 
   // ---- SWING: what I'd check every evening ----------------------------------
+  // upcoming event within 14 days: results get the loud badge (gap risk)
+  function evBadge(ev) {
+    if (!ev) return '';
+    const [d, ...rest] = ev.split(' ');
+    const what = rest.join(' ');
+    const [, mo, dd] = d.split('-');
+    const res = /\bResults\b/.test(what);
+    return ` <span class="dc-ev${res ? ' res' : ''}" title="${utils.esc(what)} on ${d} — ${res ? 'results can gap the stock past any stop: avoid holding through them' : 'corporate event'}">${res ? '⚠ ' : ''}${utils.esc(what.split(',')[0])} ${+dd} ${MON[+mo - 1]}</span>`;
+  }
   async function renderSwing() {
     try { await loadDecisionData(); } catch (e) { return decisionError(e); }
     const D = state.decide;
@@ -1222,7 +1231,7 @@
         <th title="average daily traded value, 20 sessions">₹ cr/day</th></tr></thead>
       <tbody>${list.slice(0, max).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
         <td class="tnum">${i + 1}</td>
-        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}</span></td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)}</span>${evBadge(m.ev)}</td>
         <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
         <td>${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}</td>
         <td class="tnum">${utils.fmtPrice(m.l)}</td>
@@ -1254,7 +1263,8 @@
         <section class="dc-wide"><h3>3 · Breakout watch — leaders near their highs <span class="dc-muted">${breakouts.length} stocks</span></h3>
           <div class="dc-note">RS ≥ ${S.minRS}, above the 20/50/100/150/200-day EMAs, RS line above its 21-EMA, within ${S.maxOffHigh}% of the 52-week high,
             ADR ${S.minAdr}–${S.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${S.maxWeek}% this week or > ${S.maxMonth}% this month. ● = in a leading group (ranked first).
-            Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).</div>
+            Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).
+            <span class="dc-ev res">⚠ Results</span> = reports within 14 days — don't hold through it.</div>
           ${table(breakouts, 25, 'No stock passes the breakout filter today — that itself says: stay patient.')}</section>
         <section class="dc-wide"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>
           <div class="dc-note">RS ≥ ${S.pbMinRS}, above the 50 and 200-day EMAs but back below the 20-day, ${S.pbOffHigh[0]}–${S.pbOffHigh[1]}% off the high.

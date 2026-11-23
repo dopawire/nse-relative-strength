@@ -318,7 +318,8 @@ def refresh_stocks(dry_run: bool = Query(False, description="Only list new symbo
 
     # a real refresh is followed by a quick build, so new listings show up
     args = (["refresh_classification.py", "--dry-run"] if dry_run else
-            [["refresh_classification.py"], ["refresh_flows.py"], ["build_rs.py", "--fast"]])
+            [["refresh_classification.py"], ["refresh_flows.py"], ["refresh_events.py"],
+             ["build_rs.py", "--fast"]])
 
     threading.Thread(target=_run_script, args=(args, "stocks"), daemon=True).start()
     return {"status": "started", "dry_run": dry_run, "started_at": _pipeline["started_at"]}

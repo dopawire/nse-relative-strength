@@ -60,7 +60,10 @@ with:
   stocks above the 50-day EMA, FII flows) with exposure guidance, leading
   industries, breakout candidates (RS ≥ 80 leaders in a full uptrend within
   10% of the high, liquid, tradeable ADR, not extended), pullbacks in leaders,
-  extended stocks not to chase, and risk rules.
+  extended stocks not to chase, and risk rules.  Stocks with a board meeting
+  in the next 14 days carry a badge — **⚠ Results** in amber (results can gap
+  a stock past any stop), dividends / splits / fund raising in grey — from
+  NSE's event calendar (`refresh_events.py` → `nse_events.csv`, daily).
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and
@@ -126,6 +129,7 @@ with:
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
 | `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
 | `backfill_picks.py` | Rebuild past Focus / Swing calls from price history into `nse_picks.jsonl` (one-off; live builds log each day). |
+| `refresh_events.py` | Update `nse_events.csv` — NSE board meetings (results, dividends, splits…) for the next 30 days. Best effort. |
 | `audit_data.py` | Data-integrity audit (cache validity, holiday calendar, fake bars, freshness) — exits non-zero on issues, cron-ready. |
 | `run_daily.sh` | Wrapper that runs `build_rs.py` and logs to `run.log`. |
 | `run_server.sh` | Serve the website (FastAPI backend + frontend) on `localhost:8000` (`NSE_RS_HOST=0.0.0.0` to expose it on the LAN). |

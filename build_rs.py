@@ -61,6 +61,7 @@ from rs_engine.rotation import compute_rotation
 from rs_engine.flows import build_flows
 from rs_engine.decide import decide_from_rs_data
 from rs_engine import track
+from rs_engine.events import next_events, read_events
 from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
                                 append_snapshot, build_ipo_watch)
 from rs_engine.report import write_daily_report
@@ -899,6 +900,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=No
                     "tv": round(m["tv"], 2) if m.get("tv") is not None else None,
                     "rr": m.get("rr"),        # RS rating 1-99 (vs all stocks)
                 })
+                if m.get("ev"):               # upcoming event: "YYYY-MM-DD Results"
+                    members_out[-1]["ev"] = m["ev"]
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
                 "n": it["n"], "pct": round(it["pct"], 4),
@@ -1041,6 +1044,7 @@ def main():
     skipped_breaks = []
     stock_cache = {}       # sym -> metrics (shared by all four levels)
     caps = read_cap_classes()
+    upcoming = next_events(read_events(), ref_dates[-1])
     ratings = rs_ratings({u["sym"]: cache[u["sym"]] for u in universe
                           if cache.get(u["sym"])}, ref_dates[-1])
 
@@ -1074,7 +1078,8 @@ def main():
                       "d1": period_return(ser, 1), "w1": period_return(ser, 5),
                       "tv": avg_turnover_cr(ser, volumes.get(sym, {}), 20),
                       "rr": ratings.get(sym),
-                      "cap": cap_class(sym, caps, len(ser))}
+                      "cap": cap_class(sym, caps, len(ser)),
+                      "ev": upcoming.get(sym)}
             stock_cache[sym] = st
         st = stock_cache[sym]
         return dict(st) if st else None    # copy: deltas are set per member row
