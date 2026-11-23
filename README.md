@@ -82,7 +82,7 @@ with:
   not up > 15% this week; tight bases rank first.  Real IPOs come from NSE's
   public-issues list (`refresh_events.py` → `nse_ipos.csv`, with the issue
   price) — not from a stock's first session, since NSE also lists old BSE
-  companies directly.  Backtest (250 sessions): +4.7% vs NIFTY 500 over 20
+  companies directly.  Backtest (250 sessions): +4.6% vs NIFTY 500 over 20
   sessions, 64% of picks beating it — but any recent IPO did +3.6% in this
   strong IPO year, so most of that is the IPO market, the screen adds ~1%.
 - **Track record** (on both pages) — every build logs the day's calls to
