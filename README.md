@@ -87,6 +87,13 @@ with:
   companies directly.  Backtest (250 sessions): +4.6% vs NIFTY 500 over 20
   sessions, 64% of picks beating it — but any recent IPO did +3.6% in this
   strong IPO year, so most of that is the IPO market, the screen adds ~1%.
+  **TradingView export:** each list has *Copy N for TradingView* (every
+  stock that passes, in rank order, as `NSE:SYMBOL,…` — paste it into a
+  watchlist's add-symbol box) and *⬇ .txt*; the header button saves all
+  three as one watchlist file with a `###` section per list (TradingView:
+  watchlist menu → *Import list*).  Symbols use TradingView's form — `&`
+  and `-` become `_` (M&M → `NSE:M_M`, BAJAJ-AUTO → `NSE:BAJAJ_AUTO`), as
+  does the level pages' *Copy for TradingView*.
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and

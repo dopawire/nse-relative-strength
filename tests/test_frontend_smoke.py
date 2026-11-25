@@ -322,6 +322,24 @@ def test_focus_and_swing_pages(server, browser):
     assert any(h.upper().startswith("5 · IPO BASES") for h in heads), heads
     track_rows = [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")]
     assert any("IPO BASES" in t.upper() for t in track_rows)
+    # TradingView export: per-list copy / .txt and one sectioned watchlist file
+    btn = page.query_selector("[data-tv='brk'][data-act='copy']")
+    if btn:
+        n = int(btn.inner_text().split()[1])
+        with page.expect_download() as dl:
+            page.click("[data-tv='brk'][data-act='dl']")
+        txt = open(dl.value.path()).read()
+        syms = txt.split(",")
+        assert len(syms) == n and all(s.startswith("NSE:") and "&" not in s and "-" not in s for s in syms)
+        first = page.query_selector(".dc-wide .dc-tr .msym").inner_text().split(" ·")[0].strip()
+        assert syms[0] == "NSE:" + first.replace("&", "_").replace("-", "_")   # rank order
+        with page.expect_download() as dl:
+            page.click("[data-act='all']")
+        allt = open(dl.value.path()).read()
+        assert allt.startswith("###Breakout watch,") and txt in allt
+        page.click("[data-tv='brk'][data-act='copy']")
+        page.wait_for_timeout(100)
+        assert "Copied" in btn.inner_text() or "failed" in btn.inner_text()
     rows = page.query_selector_all(".dc-tr")
     if rows:                                   # click opens the stock RS chart
         rows[0].click()

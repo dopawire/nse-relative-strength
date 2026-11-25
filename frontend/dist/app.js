@@ -1290,10 +1290,31 @@
         <span class="dc-muted">${utils.esc(r.sector)}</span>${quadTag(r.quad)}
         <span class="dc-line">${sgn(r.m1)} 1M · ${pctTxt(r.p50)} > 50-EMA · ${r.lead} leaders</span></div>`).join('');
     const ext = extended.map(m => `${stockLink(m)} <span class="dc-muted">${sgn(m.w1, 0)} 1W</span>`).join(' · ');
+    // TradingView export: each list in rank order (all that pass, not just the
+    // rows shown); "All 3 lists" is one watchlist file with a ### section each
+    const TV_LISTS = {
+      brk: { name: 'Breakout watch', file: 'breakouts', list: breakouts },
+      pb: { name: 'Pullbacks in leaders', file: 'pullbacks', list: pullbacks },
+      ipo: { name: 'IPO bases', file: 'ipo_bases', list: ipos },
+    };
+    const tvList = k => TV_LISTS[k].list.map(m => tvSym(m.s)).join(',');
+    const tvAll = () => Object.values(TV_LISTS).filter(t => t.list.length)
+      .map(t => `###${t.name},${t.list.map(m => tvSym(m.s)).join(',')}`).join(',');
+    const tvButtons = (k, shown) => {
+      const n = TV_LISTS[k].list.length;
+      if (!n) return '';
+      const what = n > shown ? `all ${n} that pass, in rank order (the table shows the top ${shown})` : `the ${n} stocks, in rank order`;
+      return `<span class="dc-tv">
+        <button type="button" class="dc-tvb" data-tv="${k}" data-act="copy" title="Copy ${what} as NSE:SYMBOL — paste into a TradingView watchlist's add-symbol box">Copy ${n} for TradingView</button>
+        <button type="button" class="dc-tvb" data-tv="${k}" data-act="dl" title="Download ${what} as a .txt — TradingView: watchlist menu → Import list">⬇ .txt</button></span>`;
+    };
+    const tvDay = D.asof || '';
     let sec = 6;
     $.content.innerHTML = `<div class="scan-card dc">
       <div class="scan-head"><div><div class="scan-title">Swing-trading desk</div>
-        <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div></div>
+        <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div>
+        ${breakouts.length + pullbacks.length + ipos.length ? `<button type="button" class="dc-tvb dc-tv-all" data-act="all"
+          title="One TradingView watchlist with a section per list (Breakout watch / Pullbacks / IPO bases) — TradingView: watchlist menu → Import list">⬇ TradingView watchlist · all 3 lists</button>` : ''}</div>
       <div class="dc-body">
         <div class="dc-answer"><span class="dc-dot r-${reg.level}"></span><div>
           <div class="dc-answer-t">Market: <b class="r-${reg.level}-t">${R.word}</b> — ${reg.pass} of ${reg.known} checks pass.</div>
@@ -1302,18 +1323,18 @@
           <section><h3>1 · Market regime checklist</h3><ul class="dc-checks">${checks}</ul></section>
           <section><h3>2 · Leading industries — where setups work best</h3>${indRows || '<div class="dc-empty">No industry is beating the average stock right now.</div>'}</section>
         </div>
-        <section class="dc-wide"><h3>3 · Breakout watch — leaders near their highs <span class="dc-muted">${breakouts.length} stocks</span></h3>
+        <section class="dc-wide"><div class="dc-h3row"><h3>3 · Breakout watch — leaders near their highs <span class="dc-muted">${breakouts.length} stocks</span></h3>${tvButtons('brk', 25)}</div>
           <div class="dc-note">RS ≥ ${S.minRS}, above the 20/50/100/150/200-day EMAs, RS line above its 21-EMA, within ${S.maxOffHigh}% of the 52-week high,
             ADR ${S.minAdr}–${S.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${S.maxWeek}% this week or > ${S.maxMonth}% this month. ● = in a leading group (ranked first).
             Buy only on a breakout from a tight range on rising volume; stop under the range low (≈ 1 ADR).
             Ranked higher when the 10-day range is <b>tight</b>, volume is <b>drying up</b> and delivery is steadily high; a volume-surge or weak-delivery day ranks lower
             (in the backtest buying that close lagged). <span class="dc-ev res">⚠ Results</span> = reports within 14 days — don't hold through it.</div>
           ${table(breakouts, 25, 'No stock passes the breakout filter today — that itself says: stay patient.')}</section>
-        <section class="dc-wide"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>
+        <section class="dc-wide"><div class="dc-h3row"><h3>4 · Pullbacks in leaders — lower-risk entries <span class="dc-muted">${pullbacks.length} stocks</span></h3>${tvButtons('pb', 15)}</div>
           <div class="dc-note">RS ≥ ${S.pbMinRS}, above the 50 and 200-day EMAs but back below the 20-day, ${S.pbOffHigh[0]}–${S.pbOffHigh[1]}% off the high.
             Enter when it turns back up (reclaims the prior day's high / the 20-EMA); stop under the pullback low.</div>
           ${table(pullbacks, 15, 'No leader is pulling back in an orderly way right now.')}</section>
-        <section class="dc-wide"><h3>5 · IPO bases — new listings near their highs <span class="dc-muted">${ipos.length} stocks</span></h3>
+        <section class="dc-wide"><div class="dc-h3row"><h3>5 · IPO bases — new listings near their highs <span class="dc-muted">${ipos.length} stocks</span></h3>${tvButtons('ipo', 15)}</div>
           <div class="dc-note">Mainboard IPOs ${IR.minAge}–${IR.maxAge} sessions old — too young for an RS rating or a 200-day EMA, so the breakout watch can't see them.
             Above the issue price, ahead of NIFTY 500 since the listing day, above every EMA it has, within ${IR.maxOffHigh}% of the high since listing,
             ADR ${IR.minAdr}–${IR.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${IR.maxWeek}% this week.
@@ -1336,6 +1357,22 @@
           Click a stock for its RS chart.</div>
       </div></div>`;
     bindStockLinks();
+    $.content.querySelectorAll('.dc-tvb').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.tv, act = b.dataset.act, label = b.textContent;
+      const done = msg => {
+        b.textContent = msg; b.classList.add('done');
+        setTimeout(() => { b.textContent = label; b.classList.remove('done'); }, 1600);
+      };
+      if (act === 'copy') {
+        toClipboard(tvList(k)).then(ok => done(ok ? `Copied ${TV_LISTS[k].list.length} ✓` : 'Copy failed'));
+      } else if (act === 'dl') {
+        saveText(tvList(k), `swing_${TV_LISTS[k].file}_${tvDay}.txt`);
+        done('Saved ✓');
+      } else {
+        saveText(tvAll(), `swing_watchlist_${tvDay}.txt`);
+        done('Saved ✓');
+      }
+    }));
   }
 
   // =========================================================================
@@ -2060,44 +2097,53 @@
     updateSelectionUI();
   }
 
+  // TradingView writes NSE symbols with '_' for '&' and '-' (M&M → NSE:M_M,
+  // BAJAJ-AUTO → NSE:BAJAJ_AUTO)
+  const tvSym = s => 'NSE:' + s.replace(/[&-]/g, '_');
+
   function tvText() {
-    return Array.from(state.selected).map(s => 'NSE:' + s).join(',\n');
+    return Array.from(state.selected).map(tvSym).join(',\n');
   }
 
-  function copyTV() {
-    if (!state.selected.size) { flashMsg('Nothing selected'); return; }
-    const txt = tvText();
+  // → Promise<boolean>: clipboard API, else the hidden-textarea fallback
+  function toClipboard(txt) {
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      return ok;
+    };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(
-        () => flashMsg('Copied ' + state.selected.size),
-        () => fallbackCopy(txt)
-      );
-    } else {
-      fallbackCopy(txt);
+      return navigator.clipboard.writeText(txt).then(() => true, fallback);
     }
+    return Promise.resolve(fallback());
   }
 
-  function fallbackCopy(txt) {
-    const ta = document.createElement('textarea');
-    ta.value = txt;
-    ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); flashMsg('Copied ' + state.selected.size); }
-    catch (e) { flashMsg('Copy failed'); }
-    document.body.removeChild(ta);
-  }
-
-  function downloadTV() {
-    if (!state.selected.size) { flashMsg('Nothing selected'); return; }
-    const blob = new Blob([tvText()], { type: 'text/plain' });
+  function saveText(txt, name) {
+    const blob = new Blob([txt], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = 'tradingview_watchlist.txt';
+    a.download = name;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(a.href);
+  }
+
+  function copyTV() {
+    if (!state.selected.size) { flashMsg('Nothing selected'); return; }
+    const n = state.selected.size;
+    toClipboard(tvText()).then(ok => flashMsg(ok ? 'Copied ' + n : 'Copy failed'));
+  }
+
+  function downloadTV() {
+    if (!state.selected.size) { flashMsg('Nothing selected'); return; }
+    saveText(tvText(), 'tradingview_watchlist.txt');
     flashMsg('Downloaded ' + state.selected.size);
   }
 
