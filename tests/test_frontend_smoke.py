@@ -281,6 +281,21 @@ def test_flows_page_draws_monthly_bars(server, browser):
         assert len(page.query_selector_all(".fl-col")) == min(12, n3)
         page.hover(".fl-col:last-child .fl-hit")
         assert "FII net" in page.inner_text("#fl-tip")
+        if page.query_selector("[data-view='D']"):    # daily slicer
+            page.click("[data-view='D']")
+            page.wait_for_timeout(200)
+            assert page.inner_text(".scan-title") == "FII / DII cash flows · daily net"
+            nd = len(page.query_selector_all(".fl-col"))
+            assert 0 < nd <= 21
+            assert len(page.query_selector_all(".fl-table tbody tr")) == nd
+            page.click("[data-range='All']")
+            page.wait_for_timeout(200)
+            assert len(page.query_selector_all(".fl-col")) >= nd
+            page.hover(".fl-col:last-child .fl-hit")
+            assert "FII net" in page.inner_text("#fl-tip")
+            page.click("[data-view='M']")
+            page.wait_for_timeout(200)
+            assert len(page.query_selector_all(".fl-col")) == min(12, n3)   # monthly range kept
     assert errors == [], errors
     ctx.close()
 

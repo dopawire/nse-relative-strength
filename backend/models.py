@@ -108,8 +108,19 @@ class FlowMonth(BaseModel):
     to: str | None = None  # last recorded session of the month
 
 
+class FlowDay(BaseModel):
+    d: str                 # YYYY-MM-DD session
+    fii: float             # FII net (₹ crore)
+    dii: float             # DII net
+    fb: float | None = None   # gross buy / sell — None on net-only archive days
+    fs: float | None = None
+    db: float | None = None
+    ds: float | None = None
+
+
 class FlowsResponse(BaseModel):
     months: list[FlowMonth] = []
+    days: list[FlowDay] = []
     asof: str | None = None
     src: str = ""
 

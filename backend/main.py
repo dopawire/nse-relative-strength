@@ -216,10 +216,10 @@ def put_watchlist(body: WatchlistIn):
 
 @app.get("/api/flows", response_model=FlowsResponse)
 def get_flows():
-    """Monthly FII / DII net cash-market flows (NSE provisional, ₹ crore)."""
+    """FII / DII net cash-market flows by month and by session (NSE provisional, ₹ crore)."""
     _check_ready()
     f = _data.get("flows") or {}
-    return {"months": f.get("months", []), "asof": f.get("asof"), "src": f.get("src", "")}
+    return {"months": f.get("months", []), "days": f.get("days", []), "asof": f.get("asof"), "src": f.get("src", "")}
 
 
 @app.get("/api/stock/{sym}", response_model=StockDetail)

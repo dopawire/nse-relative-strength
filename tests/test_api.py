@@ -132,6 +132,12 @@ def test_flows(client):
         assert ms == sorted(ms) and len(set(ms)) == len(ms)
         x = f["months"][-1]
         assert abs(x["fb"] - x["fs"] - x["fii"]) < 1 and abs(x["db"] - x["ds"] - x["dii"]) < 1
+    if f.get("days"):
+        ds = [x["d"] for x in f["days"]]
+        assert ds == sorted(ds) and len(set(ds)) == len(ds)
+        for x in f["days"]:
+            if x["fb"] is not None:
+                assert abs(x["fb"] - x["fs"] - x["fii"]) < 1 and abs(x["db"] - x["ds"] - x["dii"]) < 1
 
 
 def test_decide_and_track(client):

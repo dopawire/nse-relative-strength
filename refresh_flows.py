@@ -39,6 +39,17 @@ def fetch_nse():
     return {}
 
 
+def fetch_archive():
+    try:
+        r = requests.get(flows.ARCHIVE_URL, timeout=30,
+                         headers={"User-Agent": NSE_UA, "Accept": "text/html"})
+        if r.status_code == 200:
+            return flows.parse_archive(r.text)
+    except requests.RequestException:
+        pass
+    return {}
+
+
 RS_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rs_data.json")
 
 
@@ -63,6 +74,8 @@ def main():
                     help="do nothing when the latest session is already recorded")
     ap.add_argument("--patch", action="store_true",
                     help="on new data, also update the flows in rs_data.json")
+    ap.add_argument("--backfill", action="store_true",
+                    help="also add older daily net figures from the stockezee archive")
     args = ap.parse_args()
     if args.if_behind:
         from rs_engine.config import latest_session
@@ -79,6 +92,11 @@ def main():
     old_m = flows.read_csv(flows.MONTHLY, "month")
     old_d = flows.read_csv(flows.DAILY, "date")
     months, days = flows.merge(old_m, old_d, km, kd, nd)
+    if args.backfill:
+        arc = fetch_archive()
+        n = len(days)
+        days = flows.backfill(days, arc)
+        print(f"FII/DII: archive {len(arc)} days, {len(days) - n} added")
     if not months:
         print("FII/DII: no data available — files unchanged.")
         return 0          # best effort: never blocks the build that follows

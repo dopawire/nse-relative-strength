@@ -541,6 +541,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .fl-mtd .fl-fii,.fl-mtd .fl-dii{opacity:.6}
 .fl-tip-sum{margin-top:3px;padding-top:3px;border-top:1px solid var(--border);color:var(--text)}
 .fl-to{font-size:11px;color:var(--text-muted)}
+.fl-ctrl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.fl-wd{display:inline-block;width:30px;color:var(--text-muted);font-size:11.5px}
+.fl-na{color:var(--text-muted)}
+.fl-foot{margin-top:10px;font-size:11.5px;color:var(--text-muted)}
 .fl-table .fl-sep{border-left:1px solid var(--border);padding-left:16px}
 .fl-table .fl-gross{color:var(--text-soft)}
 /* Focus + Swing decision pages */

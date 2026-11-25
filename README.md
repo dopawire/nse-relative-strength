@@ -48,7 +48,9 @@ with:
 - **FII / DII** tab — monthly **net** cash-market flows of foreign (FII/FPI)
   and domestic (DII) institutions since Jun 2014 as paired bars (1Y / 3Y /
   5Y / All), the running month marked "to <date>", with totals and a
-  month-by-month table (net, combined, gross buy / sell).
+  month-by-month table (net, combined, gross buy / sell).  **Daily** switches
+  to one bar pair per session (1M / 3M / 6M / 1Y / All) with a day-by-day
+  table.
 - **Focus** tab — the one-shot answer: which sectors and which market-cap
   class to focus on next, with a one-liner each.  Sectors (≥ 5 stocks) are
   ranked on 1M / 3M median return vs the average stock, share above the
@@ -146,7 +148,15 @@ with:
   exactly with NSE's daily figures); NSE's own day is recorded too, and
   counted in the running month when Kotak hasn't caught up.  NSE posts the
   day's figures between ~18:00 and 21:00, so the hourly catch-up runs also
-  fetch them and patch `rs_data.json` without a full rebuild.
+  fetch them and patch `rs_data.json` without a full rebuild.  The daily
+  history before Nov 2026 (from 1 Dec 2025) was backfilled once with
+  `refresh_flows.py --backfill` from stockezee's day-by-day archive, which
+  has the net figures only, so those sessions show no gross buy / sell.  Its
+  days match NSE's to the paisa on every session both have, and Dec–Mar and
+  Oct–Nov add up to Kotak's monthly totals exactly; Apr–Sep differ by
+  ₹0.1–5k cr a month (both third-party archives agree with each other, so
+  it is likely revised vs provisional prints).  The monthly view keeps
+  Kotak's totals.
 - **NSE daily archive → official prices** (`rs_engine/nse_archive.py`,
   cache `~/.cache/nse-rs/.nse_archive.json`, last 300 sessions of NSE's
   `sec_bhavdata_full`: close, high, low, quantity, delivery).  Every build
@@ -178,7 +188,7 @@ with:
 |---|---|
 | `build_rs.py` | Fetch Yahoo prices, append history, rebuild `rs_data.json` (+ the `daily_report.html` digest). |
 | `refresh_classification.py` | When NSE lists new stocks: fetch their 4-level classification (headless browser) and append to the master. |
-| `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. |
+| `refresh_flows.py` | Update the FII / DII cash-flow history (`nse_fii_dii_monthly.csv`, `nse_fii_dii_daily.csv`). Best effort: keeps the files on failure. `--backfill` adds older daily net figures from the stockezee archive (never overwrites a recorded day). |
 | `backfill_picks.py` | Rebuild past Focus / Swing calls from price history into `nse_picks.jsonl` (one-off; live builds log each day). |
 | `refresh_events.py` | Update `nse_events.csv` — NSE board meetings (results, dividends, splits…) for the next 30 days — and `nse_ipos.csv`, NSE's list of mainboard IPOs with issue prices. Best effort. |
 | `send_brief.py` | Evening Telegram brief + watchlist alerts (once per session; no-op without a bot token). |

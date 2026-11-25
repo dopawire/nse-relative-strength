@@ -27,7 +27,8 @@
     flowsData: null,      // cached FII / DII monthly flows
     decide: null,         // Focus / Swing decisions (rs_engine.decide)
     track: null,          // their track record
-    flowRange: '3Y',      // FII / DII chart period
+    flowView: 'M',        // FII / DII: 'M' monthly bars or 'D' daily
+    flowRange: { M: '3Y', D: '1M' },   // FII / DII chart period per view
     selected: new Set(), // selected symbols for TradingView export
     breadthData: null,   // cached breadth oscillator data
     theme: 'dark',
@@ -1338,13 +1339,20 @@
   }
 
   // =========================================================================
-  // FII / DII: monthly net cash-market flows (NSE provisional, ₹ crore)
+  // FII / DII: net cash-market flows by month or by session (NSE provisional, ₹ crore)
   // =========================================================================
-  const FLOW_RANGES = { '1Y': 12, '3Y': 36, '5Y': 60, 'All': 0 };
+  const FLOW_RANGES = {
+    M: { '1Y': 12, '3Y': 36, '5Y': 60, 'All': 0 },               // months
+    D: { '1M': 21, '3M': 63, '6M': 126, '1Y': 252, 'All': 0 },   // sessions
+  };
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const WDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const monLabel = m => `${MON[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
+  const fmtD = d => { const [y, m, dd] = d.split('-'); return `${+dd} ${MON[+m - 1]} ${y}`; };
+  const dayLabel = d => `${WDAY[new Date(d + 'T00:00:00Z').getUTCDay()]} ${fmtD(d)}`;
   const crore = v => `${v >= 0 ? '+' : '−'}₹${Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })} cr`;
   const croreCell = v => `<span class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : '−'}${Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>`;
+  const grossCell = v => v == null ? '<span class="fl-na">—</span>' : v.toLocaleString('en-IN', { maximumFractionDigits: 0 });
   // axis ticks in lakh / thousand crore: 1,00,000 cr = 1L
   const axisCr = v => v === 0 ? '0' : (Math.abs(v) >= 1e5
     ? `${v < 0 ? '−' : ''}${+(Math.abs(v) / 1e5).toFixed(1)}L` : `${v < 0 ? '−' : ''}${+(Math.abs(v) / 1e3).toFixed(0)}k`);
@@ -1361,7 +1369,32 @@
     return [1, 2, 2.5, 5, 10].map(k => k * p).find(s => s >= raw);
   }
 
-  function flowChartSVG(rows, W) {
+  // x-axis label for bar i (or '') — months: every month / quarter / January
+  // as they fit; sessions: every k-th day back from the latest, or month starts
+  function monthTick(rows, slot) {
+    const every = slot >= 34 ? 1 : slot >= 11 ? 3 : 12;
+    return i => {
+      const m = rows[i].k, mo = +m.slice(5, 7);
+      if (every !== 1 && (mo - 1) % every !== 0) return '';
+      return every === 12 ? m.slice(0, 4) : every === 3 && mo !== 1 ? MON[mo - 1] : monLabel(m).replace(' 20', " '");
+    };
+  }
+  function dayTick(rows, slot) {
+    const k = Math.ceil(46 / slot);
+    if (k <= 5) {
+      return i => (rows.length - 1 - i) % k ? '' : `${+rows[i].k.slice(8)} ${MON[+rows[i].k.slice(5, 7) - 1]}`;
+    }
+    const every = slot * 21 >= 34 ? 1 : 3;                      // ~21 sessions a month
+    return i => {
+      const m = rows[i].k.slice(0, 7), mo = +m.slice(5);
+      if (i > 0 && rows[i - 1].k.slice(0, 7) === m) return '';  // not a month's first session
+      if (i === 0 && rows.length > 1 && rows[1].k.slice(0, 7) !== m) return '';
+      if ((mo - 1) % every) return '';
+      return mo === 1 ? monLabel(m).replace(' 20', " '") : MON[mo - 1];
+    };
+  }
+
+  function flowChartSVG(rows, W, daily, partial) {
     const H = 300, L = 46, R = 8, T = 12, B = 30;
     const vals = rows.flatMap(r => [r.fii, r.dii]);
     const step = niceStep(Math.max(1, Math.max(...vals, 0) - Math.min(...vals, 0)));
@@ -1370,14 +1403,13 @@
     const y = v => T + (hi - v) / (hi - lo || 1) * (H - T - B);
     const slot = (W - L - R) / rows.length;
     const gap = Math.min(2, slot * 0.08);                     // surface gap between the pair
-    const bw = Math.max(1, Math.min(14, (slot * 0.72 - gap) / 2));
+    const bw = Math.max(0.6, Math.min(14, (slot * 0.72 - gap) / 2));
     const grid = [];
     for (let v = lo; v <= hi + 1e-6; v += step) {
       grid.push(`<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="${v === 0 ? 'fl-zero' : 'fl-grid'}"/>
         <text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" class="fl-ax">${axisCr(v)}</text>`);
     }
-    // x labels: every month when they fit, else every quarter / January
-    const every = slot >= 34 ? 1 : slot >= 11 ? 3 : 12;
+    const tick = (daily ? dayTick : monthTick)(rows, slot);
     const bar = (v, x, cls) => {
       const y0 = y(0), y1 = y(v), h = Math.max(1, Math.abs(y1 - y0)), r = Math.min(4, bw / 2, h);
       // rounded data end, square at the zero baseline
@@ -1389,66 +1421,81 @@
     };
     const bars = rows.map((r, i) => {
       const cx = L + slot * i + slot / 2, x1 = cx - gap / 2 - bw, x2 = cx + gap / 2;
-      const mtd = r.to && r.to.slice(0, 7) === r.m && i === rows.length - 1 ? ' fl-mtd' : '';
-      const lbl = (+r.m.slice(5, 7) - 1) % every === 0 || every === 1
-        ? `<text x="${cx.toFixed(1)}" y="${H - B + 16}" text-anchor="middle" class="fl-ax">${every === 12 ? r.m.slice(0, 4) : every === 3 && r.m.slice(5, 7) !== '01' ? MON[+r.m.slice(5, 7) - 1] : monLabel(r.m).replace(' 20', " '")}</text>` : '';
-      return `<g class="fl-col${mtd}" data-i="${i}">
+      const t = tick(i);
+      const lbl = t ? `<text x="${cx.toFixed(1)}" y="${H - B + 16}" text-anchor="middle" class="fl-ax">${t}</text>` : '';
+      return `<g class="fl-col${partial(i) ? ' fl-mtd' : ''}" data-i="${i}">
         <rect x="${(L + slot * i).toFixed(1)}" y="${T}" width="${slot.toFixed(1)}" height="${H - T - B}" class="fl-hit"/>
         ${bar(r.fii, x1, 'fl-fii')}${bar(r.dii, x2, 'fl-dii')}${lbl}</g>`;
     }).join('');
+    const span = daily ? `${fmtD(rows[0].k)} to ${fmtD(rows[rows.length - 1].k)}`
+      : `${monLabel(rows[0].k)} to ${monLabel(rows[rows.length - 1].k)}`;
     return `<svg class="fl-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img"
-      aria-label="Monthly FII and DII net cash flows, ${monLabel(rows[0].m)} to ${monLabel(rows[rows.length - 1].m)}">
+      aria-label="${daily ? 'Daily' : 'Monthly'} FII and DII net cash flows, ${span}">
       ${grid.join('')}${bars}</svg>`;
   }
 
   function drawFlows(data) {
-    const all = data.months || [];
+    const daily = state.flowView === 'D' && (data.days || []).length > 0;
+    const all = daily ? data.days.map(r => ({ ...r, k: r.d })) : (data.months || []).map(r => ({ ...r, k: r.m }));
     if (!all.length) {
       $.content.innerHTML = '<div class="brd-empty">No FII / DII data yet — run <code>refresh_flows.py</code> and a build.</div>';
       return;
     }
-    const n = FLOW_RANGES[state.flowRange];
+    const view = daily ? 'D' : 'M';
+    const n = FLOW_RANGES[view][state.flowRange[view]];
     const rows = n ? all.slice(-n) : all;
     const last = all[all.length - 1];
-    const fmtD = d => { const [y, m, dd] = d.split('-'); return `${+dd} ${MON[+m - 1]} ${y}`; };
-    const running = last.to && last.to.slice(0, 7) === last.m;
+    const running = !daily && last.to && last.to.slice(0, 7) === last.m;
+    const partial = i => running && rows[i] === last;
+    const label = r => daily ? fmtD(r.k) : monLabel(r.k);
     const sum = k => rows.reduce((a, r) => a + r[k], 0);
+    const firstGross = daily ? (all.find(r => r.fb != null) || {}).k : null;
+    const netOnly = daily && rows.some(r => r.fb == null);
     const table = rows.slice().reverse().map(r => `<tr>
-        <td>${monLabel(r.m)}${r === last && running ? ` <span class="fl-to">to ${fmtD(r.to)}</span>` : ''}</td>
+        <td>${daily ? `<span class="fl-wd">${WDAY[new Date(r.k + 'T00:00:00Z').getUTCDay()]}</span> ` : ''}${label(r)}${r === last && running ? ` <span class="fl-to">to ${fmtD(r.to)}</span>` : ''}</td>
         <td class="tnum">${croreCell(r.fii)}</td><td class="tnum">${croreCell(r.dii)}</td>
         <td class="tnum fl-sep">${croreCell(r.fii + r.dii)}</td>
-        <td class="tnum fl-gross">${r.fb.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-        <td class="tnum fl-gross">${r.fs.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-        <td class="tnum fl-gross">${r.db.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-        <td class="tnum fl-gross">${r.ds.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td></tr>`).join('');
+        <td class="tnum fl-gross">${grossCell(r.fb)}</td>
+        <td class="tnum fl-gross">${grossCell(r.fs)}</td>
+        <td class="tnum fl-gross">${grossCell(r.db)}</td>
+        <td class="tnum fl-gross">${grossCell(r.ds)}</td></tr>`).join('');
+    const seg = (attr, keys, on, txt = k => k) =>
+      `<div class="seg">${keys.map(k => `<button type="button" data-${attr}="${k}" class="${k === on ? 'on' : ''}">${txt(k)}</button>`).join('')}</div>`;
+    const sub = daily
+      ? `NSE provisional cash market, ₹ crore · ${fmtD(rows[0].k)} – ${fmtD(last.k)} · ${rows.length} sessions`
+      : `NSE provisional cash market, ₹ crore · ${monLabel(rows[0].k)} – ${monLabel(last.k)}${running ? ` (to ${fmtD(last.to)})` : ''}`;
     $.content.innerHTML = `<div class="scan-card">
       <div class="scan-head">
-        <div><div class="scan-title">FII / DII cash flows · monthly net</div>
-          <div class="scan-sub">NSE provisional cash market, ₹ crore · ${monLabel(rows[0].m)} – ${monLabel(last.m)}${running ? ` (to ${fmtD(last.to)})` : ''}</div></div>
-        <div class="seg">${Object.keys(FLOW_RANGES).map(k => `<button type="button" data-range="${k}" class="${k === state.flowRange ? 'on' : ''}">${k}</button>`).join('')}</div>
+        <div><div class="scan-title">FII / DII cash flows · ${daily ? 'daily' : 'monthly'} net</div>
+          <div class="scan-sub">${sub}</div></div>
+        <div class="fl-ctrl">
+          ${(data.days || []).length ? seg('view', ['M', 'D'], view, k => k === 'M' ? 'Monthly' : 'Daily') : ''}
+          ${seg('range', Object.keys(FLOW_RANGES[view]), state.flowRange[view])}
+        </div>
       </div>
       <div class="fl-body">
         <div class="fl-legend">
           <span><i class="fl-key fl-fii"></i>FII net <b class="tnum">${crore(sum('fii'))}</b></span>
           <span><i class="fl-key fl-dii"></i>DII net <b class="tnum">${crore(sum('dii'))}</b></span>
-          <span class="fl-note">totals over the ${rows.length} months shown</span>
+          <span class="fl-note">totals over the ${rows.length} ${daily ? 'sessions' : 'months'} shown</span>
         </div>
         <div class="fl-viz" id="fl-viz"></div>
         <div class="scan-table-wrap"><table class="scan-table fl-table">
-          <thead><tr><th>Month</th><th>FII net</th><th>DII net</th><th class="fl-sep">FII + DII</th>
+          <thead><tr><th>${daily ? 'Session' : 'Month'}</th><th>FII net</th><th>DII net</th><th class="fl-sep">FII + DII</th>
             <th title="FII gross purchase">FII buy</th><th title="FII gross sales">FII sell</th>
             <th title="DII gross purchase">DII buy</th><th title="DII gross sales">DII sell</th></tr></thead>
           <tbody>${table}</tbody></table></div>
+        ${netOnly ? `<div class="fl-foot">Gross buy / sell are recorded from ${firstGross ? fmtD(firstGross) : 'NSE'}; earlier sessions carry the net figures only (stockezee.com day-by-day archive, which matches NSE's own figures on every session both have).</div>` : ''}
       </div>
     </div>`;
     const viz = document.getElementById('fl-viz');
     const paint = () => {
-      viz.innerHTML = flowChartSVG(rows, Math.max(300, viz.clientWidth)) + '<div class="scan-tip" id="fl-tip"></div>';
+      viz.innerHTML = flowChartSVG(rows, Math.max(300, viz.clientWidth), daily, partial) + '<div class="scan-tip" id="fl-tip"></div>';
       const tip = document.getElementById('fl-tip');
       viz.querySelectorAll('.fl-col').forEach(g => {
         g.addEventListener('mousemove', ev => {
           const r = rows[+g.dataset.i];
-          tip.innerHTML = `<b>${monLabel(r.m)}${r.to && r === last && running ? ` · to ${fmtD(r.to)}` : ''}</b>
+          tip.innerHTML = `<b>${daily ? dayLabel(r.k) : monLabel(r.k)}${partial(+g.dataset.i) ? ` · to ${fmtD(r.to)}` : ''}</b>
             <div><i class="fl-key fl-fii"></i>FII net ${crore(r.fii)}</div>
             <div><i class="fl-key fl-dii"></i>DII net ${crore(r.dii)}</div>
             <div class="fl-tip-sum">Combined ${crore(r.fii + r.dii)}</div>`;
@@ -1464,7 +1511,11 @@
     paint();
     state.flowPaint = paint;
     $.content.querySelectorAll('[data-range]').forEach(b => b.addEventListener('click', () => {
-      state.flowRange = b.dataset.range;
+      state.flowRange[view] = b.dataset.range;
+      drawFlows(data);
+    }));
+    $.content.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+      state.flowView = b.dataset.view;
       drawFlows(data);
     }));
   }

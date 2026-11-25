@@ -10,6 +10,11 @@ The monthly history (Jun 2014 →) comes from Kotak Neo's FII/DII page, which
 republishes NSE's provisional numbers (they reconcile to the paisa with NSE's
 own daily figures).  NSE's API only serves the latest session, so it is
 recorded daily as the official cross-check / fallback for the current month.
+
+Daily history before the first recorded session was backfilled once
+(`refresh_flows.py --backfill`) from stockezee's day-by-day archive, which
+carries the net figures only — those rows have no gross buy / sell.  Its
+days agree to the paisa with NSE's own for every session both have.
 """
 import csv
 import datetime as dt
@@ -22,6 +27,7 @@ DAILY = os.path.join(ROOT, "nse_fii_dii_daily.csv")
 
 KOTAK_URL = "https://www.kotakneo.com/share-market-today/fii-dii-data/"
 NSE_URL = "https://www.nseindia.com/api/fiidiiTradeReact"
+ARCHIVE_URL = "https://www.stockezee.com/fii-dii-historical-data"
 
 FIELDS = ["fii_buy", "fii_sell", "fii_net", "dii_buy", "dii_sell", "dii_net"]
 MIN_MONTHS = 100          # a sane Kotak page has ~150 months since 2014
@@ -75,11 +81,27 @@ def parse_nse(rows):
     return {d: r for d, r in out.items() if len(r) == len(FIELDS)}
 
 
+def parse_archive(html):
+    """stockezee's day-by-day archive (Next.js page data) → {"YYYY-MM-DD":
+    {fii_net, dii_net, and None for the gross buy / sell it doesn't carry}}."""
+    out = {}
+    text = html.replace('\\"', '"')
+    for m in re.finditer(r'"date":"(\d{4}-\d\d-\d\d)T00:00:00","fii_cash":\[(.*?)\]', text):
+        fii = re.search(r'"FII/FPI","net_value":(-?\d+(?:\.\d+)?)', m.group(2))
+        dii = re.search(r'"DII","net_value":(-?\d+(?:\.\d+)?)', m.group(2))
+        if fii and dii:
+            rec = dict.fromkeys(FIELDS)
+            rec.update(fii_net=float(fii.group(1)), dii_net=float(dii.group(1)))
+            out[m.group(1)] = rec
+    return out
+
+
 def read_csv(path, key):
+    """Blank cells (net-only archive days) read as None."""
     if not os.path.exists(path):
         return {}
     with open(path, newline="", encoding="utf-8") as f:
-        return {r[key]: {k: float(r[k]) for k in FIELDS}
+        return {r[key]: {k: float(r[k]) if r.get(k) not in ("", None) else None for k in FIELDS}
                 for r in csv.DictReader(f) if r.get(key)}
 
 
@@ -89,8 +111,16 @@ def write_csv(path, key, data):
         w = csv.writer(f)
         w.writerow([key] + FIELDS)
         for k in sorted(data):
-            w.writerow([k] + [f"{data[k][x]:.2f}" for x in FIELDS])
+            w.writerow([k] + ["" if data[k][x] is None else f"{data[k][x]:.2f}" for x in FIELDS])
     os.replace(tmp, path)
+
+
+def backfill(days, archive):
+    """Archive days not recorded yet (never overwrites a recorded day)."""
+    out = dict(days)
+    for d, rec in archive.items():
+        out.setdefault(d, rec)
+    return out
 
 
 def merge(months_old, days_old, kotak_months, kotak_days, nse_days):
@@ -132,11 +162,20 @@ def monthly_series(months, days):
             for m, r in sorted(months.items())]
 
 
+def daily_series(days):
+    """Daily chart rows, oldest first; fb/fs/db/ds are None on net-only days."""
+    r2 = lambda v: None if v is None else round(v, 2)  # noqa: E731
+    return [{"d": d, "fii": r2(r["fii_net"]), "dii": r2(r["dii_net"]),
+             "fb": r2(r["fii_buy"]), "fs": r2(r["fii_sell"]),
+             "db": r2(r["dii_buy"]), "ds": r2(r["dii_sell"])}
+            for d, r in sorted(days.items())]
+
+
 def build_flows():
     """rs_data.json["flows"] from the two CSVs — {} when there is no data."""
     months, days = read_csv(MONTHLY, "month"), read_csv(DAILY, "date")
     if not months and not days:
         return {}
     rows = monthly_series(months, days)
-    return {"months": rows, "asof": max(days) if days else None,
+    return {"months": rows, "days": daily_series(days), "asof": max(days) if days else None,
             "src": "NSE provisional (cash market), ₹ crore"}

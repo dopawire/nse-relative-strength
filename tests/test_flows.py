@@ -105,3 +105,22 @@ def test_refresh_flows_main_patches_rs_data(tmp_path, monkeypatch):
     monkeypatch.setattr(rf, "fetch_kotak", lambda: (_ for _ in ()).throw(AssertionError("fetched")))
     monkeypatch.setattr(sys, "argv", ["refresh_flows.py", "--if-behind"])
     assert rf.main() == 0                          # already current: no fetch
+
+
+def test_archive_backfill_is_net_only_and_never_overwrites(tmp_path):
+    html = ('<script>{"days":[{"date":"2026-11-20T00:00:00","fii_cash":[{"category":"FII/FPI",'
+            '"net_value":10308.42,"created_at":"x"},{"category":"DII","net_value":-4859.8}],"fii_oi":[]},'
+            '{"date":"2026-11-19T00:00:00","fii_cash":[{"category":"FII/FPI","net_value":1.5}]}]}</script>')
+    arc = flows.parse_archive(html)
+    assert set(arc) == {"2026-11-20"}                # 19th lacks DII → skipped
+    assert arc["2026-11-20"]["fii_net"] == 10308.42 and arc["2026-11-20"]["dii_buy"] is None
+    own = {"2026-11-20": _rec(7, -2)}
+    days = flows.backfill(own, {**arc, "2026-11-18": arc["2026-11-20"]})
+    assert days["2026-11-20"] == own["2026-11-20"]   # recorded day wins
+    assert days["2026-11-18"]["fii_buy"] is None
+    p = tmp_path / "d.csv"
+    flows.write_csv(str(p), "date", days)
+    assert flows.read_csv(str(p), "date") == days    # blanks round-trip as None
+    rows = flows.daily_series(days)
+    assert [r["d"] for r in rows] == ["2026-11-18", "2026-11-20"]
+    assert rows[0]["fb"] is None and rows[0]["fii"] == 10308.42 and rows[1]["fb"] == 107.0
