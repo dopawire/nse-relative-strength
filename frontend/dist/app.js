@@ -1618,8 +1618,9 @@
       aria-label="${total} stocks across ${groupsN} ${unit}">
       <circle r="${R}" cx="100" cy="100" fill="none" class="sd-track" stroke-width="${W}"/>
       ${arcs}
-      <text x="100" y="98" text-anchor="middle" class="sd-hero">${total}</text>
-      <text x="100" y="122" text-anchor="middle" class="sd-sub">stocks · ${groupsN} ${unit}</text>
+      <text x="100" y="93" text-anchor="middle" class="sd-hero"${String(total).length > 3 ? ' style="font-size:30px"' : ''}>${total}</text>
+      <text x="100" y="113" text-anchor="middle" class="sd-sub">stocks</text>
+      <text x="100" y="128" text-anchor="middle" class="sd-sub">${groupsN} ${unit}</text>
     </svg>`;
   }
 
