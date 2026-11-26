@@ -1237,6 +1237,7 @@
     const ipos = pick(D.ipos || []), IR = D.ipo_rules || {};
     const weekly = pick(D.weekly || []), WR = D.weekly_rules || {};
     const inBrk = new Set(D.breakouts.slice(0, 25));
+    const inIpo = new Set((D.ipos || []).slice(0, 15));
     const ind = Object.fromEntries(D.industries.map(r => [r.name, r]));
     const leadInd = D.lead_ind.map(n => ind[n]).filter(Boolean);
 
@@ -1309,7 +1310,7 @@
         <td class="tnum">${m.h == null ? '—' : m.h.toFixed(1) + '%'}</td>
         <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
-        <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
+        <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${inIpo.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s IPO bases list — a listing under a year old">IPO base</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
     const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
         <span class="dc-ck">${c.ok === null ? '–' : c.ok ? '✓' : '✗'}</span>${c.t}<span class="dc-cv">${utils.esc(c.v)}</span></li>`).join('');
