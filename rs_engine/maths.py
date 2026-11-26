@@ -398,7 +398,7 @@ def _htf_at(c, h, lo, b, R):
     return P, p, pl, gain, depth
 
 
-def htf_state(c, h, lo, v, R=HTF):
+def htf_state(c, h, lo, v, R=HTF, _early=True):
     """High Tight Flag from aligned daily bars (oldest first, last = today):
     a pole of ≥ +100% in ≤ 9 weeks (45 sessions) to the pivot high, then a
     flag ≤ 25% deep for 1–8 weeks (the model book's longest flag was 43 days;
@@ -417,7 +417,9 @@ def htf_state(c, h, lo, v, R=HTF):
            lower-risk entry than the pivot (the model book's "early /
            aggressive entry")
       es   its stop: the low of that range
-      eb   sessions since a close above et (still under the pivot), or None
+      eb   sessions since a close above et, or None.  After the pivot breaks
+           they still describe the early trigger that fired before it (the
+           flag as it stood the session before the breakout).
       vx   volume on that breakout session (pivot or early) ÷ the flag's
            average volume before it — the confirmation (≥ 1.5 = strong)
 
@@ -459,7 +461,13 @@ def htf_state(c, h, lo, v, R=HTF):
             continue                                   # not the first close above it
         if not (P * (1 - R["boHold"] / 100) <= c[t] <= P * (1 + R["boMax"] / 100)):
             return None                                # failed, or already extended
-        return pack(P, p, pl, gain, (1 - min(lo[p:b]) / P) * 100, k)
+        # the early trigger that fired inside the flag before this breakout
+        early = (None, None, None)
+        if _early and b >= 60:
+            pre = htf_state(c[:b], h[:b], lo[:b], v[:b], R, _early=False)
+            if pre and pre["bo"] is None and pre["eb"] is not None:
+                early = (pre["et"], pre["es"], pre["eb"] + (t - b + 1))
+        return pack(P, p, pl, gain, (1 - min(lo[p:b]) / P) * 100, k, early)
     # still in the flag
     seg = h[t - R["flagMax"]:t + 1]
     P = max(seg)

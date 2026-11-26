@@ -345,7 +345,10 @@ def test_htf_early_trigger_set_then_hit():
     failed = maths.htf_state(*_early_bars(extra=(200.0, 180.0)))
     assert failed["eb"] is None                              # fell back under the range low
     piv = maths.htf_state(*_early_bars(extra=(200.0, 220.0)))
-    assert piv["bo"] == 0 and piv["et"] is None and piv["vx"] is not None
+    assert piv["bo"] == 0 and piv["vx"] is not None
+    assert piv["et"] == r["et"] and piv["eb"] == 1          # the early entry stays on the row
+    plain = maths.htf_state(*_early_bars(extra=(220.0,)))   # straight through the pivot
+    assert plain["bo"] == 0 and plain["eb"] is None
 
 
 def test_listing_volume_left_out():

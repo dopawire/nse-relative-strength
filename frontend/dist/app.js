@@ -1323,7 +1323,7 @@
       : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">broke out ${when(h.bo)}${volX(h.vx)}</span>`;
     // early trigger: the high of a tight 10-day range inside the flag (stop: its low)
     const htfEarly = (h, price) => {
-      if (h.bo != null || h.et == null) return '<span class="dc-muted">—</span>';
+      if (h.et == null || (h.bo != null && h.eb == null)) return '<span class="dc-muted">—</span>';
       const risk = price ? ` (${((1 - h.es / price) * 100).toFixed(0)}% risk)` : '';
       return h.eb != null
         ? `<b class="tnum">${utils.fmtPrice(h.et)} hit</b><span class="dc-sub2">${when(h.eb)} · stop ${utils.fmtPrice(h.es)}${risk}</span>`
