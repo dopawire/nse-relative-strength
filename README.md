@@ -100,14 +100,15 @@ with:
   a third of the list overlaps the breakout watch.
   **High tight flags** (`maths.htf_state`) — the rare pattern from the
   O'Neil / IBD model book: a pole of ≥ +100% in ≤ 9 weeks (low → pivot high),
-  then a flag ≤ 25% deep for 1–6 weeks; the buy point is the first close
+  then a flag ≤ 25% deep for 1–8 weeks (the book's longest flag was 43
+  days; 8 weeks tested as well as 6 on NSE); the buy point is the first close
   above the pivot.  Listed while in the flag, and for 5 sessions after a
   breakout that holds (≥ 95% of the pivot, ≤ 15% above it); liquid stocks
   only (≥ ₹5 cr/day, ≥ ₹50).  Each row shows the pole, flag depth and
   length, the pivot, today's distance to it and flag ÷ pole volume; *Flag vol
-  dry-up* (< 0.7×) ranks first.  NSE test of the function itself (82 liquid
-  breakouts, Nov 2024 – Nov 2026): +4.7% vs NIFTY 500 over 20 sessions;
-  with dry-up +6.7%, 38% reached +20% before −8% and 27% went +50% within 3
+  dry-up* (< 0.7×) ranks first.  NSE test of the function itself (86 liquid
+  breakouts, Nov 2024 – Nov 2026): +4.8% vs NIFTY 500 over 20 sessions;
+  with dry-up +6.8%, 37% reached +20% before −8% and 26% went +50% within 3
   months (without: +2.8%, 29%, 15%; ordinary flag breakouts 24%, 6%).  The
   median trade is flat — the edge is a fat tail, so stops matter; 2025 H1's
   small-cap correction saw almost none work.  India specifics in the page

@@ -1239,7 +1239,7 @@
     const ipos = pick(D.ipos || []), IR = D.ipo_rules || {};
     const weekly = pick(D.weekly || []), WR = D.weekly_rules || {};
     // older rs_data.json (built before the HTF list) has no rules: defaults
-    const htfs = pick(D.htf || []), HR = { minPole: 100, poleWeeks: 9, maxFlag: 25, flagWeeks: [1, 6], boDays: 5, ...(D.htf_rules || {}) };
+    const htfs = pick(D.htf || []), HR = { minPole: 100, poleWeeks: 9, maxFlag: 25, flagWeeks: [1, 8], boDays: 5, ...(D.htf_rules || {}) };
     const inBrk = new Set(D.breakouts.slice(0, 25));
     const inIpo = new Set((D.ipos || []).slice(0, 15));
     const ind = Object.fromEntries(D.industries.map(r => [r.name, r]));
@@ -1411,7 +1411,7 @@
         <section class="dc-wide"><div class="dc-h3row"><h3>7 · High tight flags — a +${HR.minPole}% pole, then a tight flag <span class="dc-muted">${htfs.length} stocks</span></h3>${tvButtons('htf', 15)}</div>
           <div class="dc-note">The rare, explosive pattern: up ≥ ${HR.minPole}% in ≤ ${HR.poleWeeks} weeks (the pole), then a pullback of ≤ ${HR.maxFlag}% lasting ${HR.flagWeeks[0]}–${HR.flagWeeks[1]} weeks (the flag);
             buy the first close above the pivot (the pole high). Listed while in the flag, and for ${HR.boDays} sessions after a breakout that holds. ≥ ₹${S.minTurnoverCr} cr/day only.
-            <span class="dc-tag t-vdry">Flag vol dry-up</span> ranks first — in the NSE test (82 breakouts, 2024–26) those beat NIFTY 500 by +6.7% over 20 sessions and 27% went +50% within 3 months
+            <span class="dc-tag t-vdry">Flag vol dry-up</span> ranks first — in the NSE test (86 breakouts, 2024–26) those beat NIFTY 500 by +6.8% over 20 sessions and 26% went +50% within 3 months
             (without dry-up +2.8%, 15%); but the median trade was flat, so use a stop (≈ 8% / under the flag low) and let the few big winners run.
             <b>India check:</b> a stock up 100% in weeks is often put in NSE's <b>ASM</b> list (higher margin, sometimes trade-for-trade) — look it up before buying; circuit limits can gap through a stop.</div>
           ${htfTable(htfs)}</section>

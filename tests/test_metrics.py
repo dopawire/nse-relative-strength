@@ -298,7 +298,8 @@ def test_htf_rejects_weak_poles_deep_flags_and_splits():
     assert maths.htf_state(*_htf_bars(pole=80)) is None    # pole under +100%
     assert maths.htf_state(*_htf_bars(flag_depth=30)) is None
     assert maths.htf_state(*_htf_bars(flag_len=2)) is None # no flag yet
-    assert maths.htf_state(*_htf_bars(flag_len=35)) is None
+    assert maths.htf_state(*_htf_bars(flag_len=35))["fw"] == 35   # 7 weeks: still a flag
+    assert maths.htf_state(*_htf_bars(flag_len=45)) is None        # over 8 weeks
     c, h, lo, v = _htf_bars()
     for k in range(50, 60):                                # a 2:1 split inside the pole
         c[k], h[k], lo[k] = c[k] * 2, h[k] * 2, lo[k] * 2

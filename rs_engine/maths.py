@@ -338,9 +338,9 @@ def weekly_trend(wcl, period=WEEKLY_SMA):
             "u": 1 if sma[-1] > sma[-2] else 0, "n": n}
 
 
-HTF = {"minPole": 100.0, "poleSessions": 45, "maxFlag": 25.0, "flagMin": 4, "flagMax": 30,
+HTF = {"minPole": 100.0, "poleSessions": 45, "maxFlag": 25.0, "flagMin": 4, "flagMax": 40,
        "boDays": 5, "boHold": 5.0, "boMax": 15.0, "dry": 0.7}
-HTF_SESSIONS = 82        # bars htf_state needs: breakout look-back + flag + pole
+HTF_SESSIONS = 100       # bars htf_state needs: breakout look-back + flag + pole
 
 
 def _last_index(xs, x, i0, i1):
@@ -354,8 +354,8 @@ def _last_index(xs, x, i0, i1):
 
 def _htf_at(c, h, lo, b, R):
     """The flag behind bar b: (pivot, pivot index, pole low index, gain %, depth %)
-    with the pivot = the highest high of the 31 bars before b, or None."""
-    w0 = b - 31
+    with the pivot = the highest high of the flagMax + 1 bars before b, or None."""
+    w0 = b - R["flagMax"] - 1
     if w0 < 0:
         return None
     seg = h[w0:b]
@@ -374,7 +374,8 @@ def _htf_at(c, h, lo, b, R):
 def htf_state(c, h, lo, v, R=HTF):
     """High Tight Flag from aligned daily bars (oldest first, last = today):
     a pole of ≥ +100% in ≤ 9 weeks (45 sessions) to the pivot high, then a
-    flag ≤ 25% deep for 1–6 weeks.  Either still in the flag (today's close
+    flag ≤ 25% deep for 1–8 weeks (the model book's longest flag was 43 days;
+    on NSE 8 weeks tested as well as 6 and keeps the late breakouts).  Either still in the flag (today's close
     at or under the pivot) or broken out — first close above the pivot —
     within the last 5 sessions and holding (≥ 95% of the pivot, ≤ 15% above).
 
@@ -417,9 +418,9 @@ def htf_state(c, h, lo, v, R=HTF):
             return None                                # failed, or already extended
         return pack(P, p, pl, gain, (1 - min(lo[p:b]) / P) * 100, k)
     # still in the flag
-    seg = h[t - 30:t + 1]
+    seg = h[t - R["flagMax"]:t + 1]
     P = max(seg)
-    p = t - 30 + seg.index(P)
+    p = t - R["flagMax"] + seg.index(P)
     if not (R["flagMin"] <= t - p <= R["flagMax"] - 1) or c[t] > P:
         return None
     # (the same window the breakout test uses for tomorrow: it breaks out on

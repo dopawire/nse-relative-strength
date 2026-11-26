@@ -34,11 +34,11 @@ IPO = {"minAge": 10, "maxAge": 250, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 10,
 # 54% beat it — vs +1.2% for RS-80 stocks below their 10-week line.
 WEEKLY = {"sma": 10, "minRS": 90, "minAdr": 2, "maxAdr": 8, "maxWeek": 15, "maxMonth": 50, "near": 5}
 # High Tight Flags (maths.htf_state finds them): liquid stocks only.  NSE
-# test of htf_state itself (82 liquid breakouts, Nov 2024 – Nov 2026): +4.7%
-# vs NIFTY 500 over 20 sessions; with volume drying up in the flag +6.7%, 38%
-# reached +20% before −8% and 27% went +50% within 3 months (without: +2.8%,
+# test of htf_state itself (86 liquid breakouts, Nov 2024 – Nov 2026): +4.8%
+# vs NIFTY 500 over 20 sessions; with volume drying up in the flag +6.8%, 37%
+# reached +20% before −8% and 26% went +50% within 3 months (without: +2.8%,
 # 29%, 15%; ordinary breakouts: 24%, 6%).  Fat tail, median ≈ flat — stops.
-HTF_RULES = {"minPole": 100, "poleWeeks": 9, "maxFlag": 25, "flagWeeks": [1, 6], "dry": 0.7,
+HTF_RULES = {"minPole": 100, "poleWeeks": 9, "maxFlag": 25, "flagWeeks": [1, 8], "dry": 0.7,
              "boDays": 5}
 N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS, N_WEEKLY, N_HTF = 25, 15, 12, 15, 25, 15
 
