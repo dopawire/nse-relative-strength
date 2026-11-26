@@ -190,3 +190,28 @@ def test_add_missing_fills_only_new_lists(tmp_path):
     got = track.read_picks(p)[0]
     assert got == {"date": "2026-11-20", "regime": "on", "breakouts": ["A"], "ipos": ["C"]}
     assert not track.add_missing(bt, p)                 # nothing left to add
+
+
+def wk_stock(s, d=3.0, u=1, n=6, **kw):
+    m = stock(s, "Alpha", rr=kw.pop("rr", 95), **kw)
+    m["wk"] = {"s": 480.0, "d": d, "u": u, "n": n}
+    return m
+
+
+def test_weekly_trend_list():
+    st = universe() + [
+        wk_stock("WKA", rr=99, d=12),                  # far above the line: in, strongest first
+        wk_stock("WKB", rr=96, d=3),                   # near the 10W line: in, tagged
+        wk_stock("BELOW", d=-2),                       # weekly close under the 10W SMA
+        wk_stock("FLAT", u=0),                         # 10W SMA not rising
+        wk_stock("LOWRS", rr=85),                      # RS under 90
+        wk_stock("WIDE", a=9.5),                       # ADR too wide
+        wk_stock("HOTW", w1=20),                       # extended this week
+        wk_stock("THINW", tv=1),                       # illiquid
+    ]
+    d = decide.analyse(st)
+    assert d["weekly"] == ["WKA", "WKB"]
+    assert "near10" in d["tags"]["WKB"] and "near10" not in d["tags"].get("WKA", [])
+    assert d["weekly_rules"]["sma"] == 10 and d["weekly_rules"]["minRS"] == 90
+    rec = track.pick_record({**d, "asof": "2026-11-26"})
+    assert rec["weekly"] == ["WKA", "WKB"]

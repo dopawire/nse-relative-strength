@@ -1143,6 +1143,7 @@
         <tbody><tr><td title="average return of the day's top 25 breakout candidates minus NIFTY 500">Breakout watch vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].brk)).join('')}</tr>
           <tr><td title="average return of the day's top 15 pullback candidates minus NIFTY 500">Pullbacks vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].pb)).join('')}</tr>
           <tr><td title="average return of the day's top 15 IPO bases minus NIFTY 500">IPO bases vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].ipo)).join('')}</tr>
+          <tr><td title="average return of the day's top 25 weekly-trend stocks (above a rising 10-week SMA) minus NIFTY 500">Weekly trend vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].wkl)).join('')}</tr>
           <tr><td title="breakout watch vs NIFTY 500, split by the market regime on the day of the call">Breakouts by regime</td>${HZ.map(brkReg).join('')}</tr>
           <tr><td title="NIFTY 500's average return after days with each regime reading">NIFTY 500 after each regime</td>${HZ.map(reg).join('')}</tr></tbody></table></div>
       <div class="dc-note">Lists are bought at that day's close and held, without stops or costs — the raw edge of the screen, not a trading result.</div>`;
@@ -1205,13 +1206,14 @@
   }
 
   // ---- SWING: what I'd check every evening ----------------------------------
-  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge', dhi: 'High delivery', dlo: 'Weak delivery' };
+  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge', dhi: 'High delivery', dlo: 'Weak delivery', near10: 'Near 10W' };
   const TAG_TIP = {
     tight: '10-day range within 2.5 average daily ranges — a quiet base (ranked higher)',
     dry: '10-day volume below 85% of the prior 50 days — sellers drying up (ranked higher)',
     surge: 'today’s volume ≥ 1.5× average — buying this close is chasing; wait for a pause (ranked lower)',
     dhi: '20-day average delivery ≥ 50% — steady buying into demat (breakouts ranked higher)',
     dlo: 'today’s delivery below 80% of its average — more intraday churn than buying (breakouts ranked lower)',
+    near10: 'within 5% above its 10-week SMA — close to the weekly support line, a low-risk entry',
   };
   // upcoming event within 14 days: results get the loud badge (gap risk)
   function evBadge(ev) {
@@ -1233,6 +1235,8 @@
     const pick = syms => syms.map(s => byS.get(s)).filter(Boolean);
     const breakouts = pick(D.breakouts), pullbacks = pick(D.pullbacks), extended = pick(D.extended);
     const ipos = pick(D.ipos || []), IR = D.ipo_rules || {};
+    const weekly = pick(D.weekly || []), WR = D.weekly_rules || {};
+    const inBrk = new Set(D.breakouts.slice(0, 25));
     const ind = Object.fromEntries(D.industries.map(r => [r.name, r]));
     const leadInd = D.lead_ind.map(n => ind[n]).filter(Boolean);
 
@@ -1284,6 +1288,29 @@
         <td class="tnum">${m.tt == null ? '—' : m.tt.toFixed(1) + '%'}</td>
         <td>${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="dc-empty">No recent IPO is basing near its high right now.</div>';
+    const weeklyTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
+      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
+        <th title="RS rating 1-99 vs all stocks">RS</th>
+        <th title="10-week simple moving average of weekly closes (this week's bar closes at the latest price)">10W SMA</th>
+        <th title="% the price is above the 10-week SMA — small = near the weekly support line">vs 10W</th>
+        <th title="weekly closes in a row above the 10-week SMA (this week included)">Weeks above</th>
+        <th>1W</th><th>1M</th><th title="% below the 52-week high">Off high</th>
+        <th title="average daily range, 20 days">ADR</th><th title="average daily traded value, 20 sessions">₹ cr/day</th><th>Setup</th></tr></thead>
+      <tbody>${list.slice(0, 25).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
+        <td class="tnum">${i + 1}</td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)} · ${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}${evBadge(m.ev)}</span></td>
+        <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
+        <td class="tnum">${utils.fmtPrice(m.l)}</td>
+        <td class="tnum"><b>${m.rr ?? '—'}</b></td>
+        <td class="tnum">${utils.fmtPrice(m.wk.s)}</td>
+        <td class="tnum">${tone(m.wk.d)}</td>
+        <td class="tnum">${m.wk.n}</td>
+        <td class="tnum">${tone(m.w1)}</td><td class="tnum">${tone(m.m1)}</td>
+        <td class="tnum">${m.h == null ? '—' : m.h.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
+        <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
     const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
         <span class="dc-ck">${c.ok === null ? '–' : c.ok ? '✓' : '✗'}</span>${c.t}<span class="dc-cv">${utils.esc(c.v)}</span></li>`).join('');
     const indRows = leadInd.map(r => `<div class="dc-ind-row"><b>${utils.esc(r.name)}</b>
@@ -1296,6 +1323,7 @@
       brk: { name: 'Breakout watch', file: 'breakouts', list: breakouts },
       pb: { name: 'Pullbacks in leaders', file: 'pullbacks', list: pullbacks },
       ipo: { name: 'IPO bases', file: 'ipo_bases', list: ipos },
+      wk: { name: 'Weekly trend above 10W SMA', file: 'weekly_10w', list: weekly },
     };
     const tvList = k => TV_LISTS[k].list.map(m => tvSym(m.s)).join(',');
     const tvAll = () => Object.values(TV_LISTS).filter(t => t.list.length)
@@ -1309,12 +1337,12 @@
         <button type="button" class="dc-tvb" data-tv="${k}" data-act="dl" title="Download ${what} as a .txt — TradingView: watchlist menu → Import list">⬇ .txt</button></span>`;
     };
     const tvDay = D.asof || '';
-    let sec = 6;
+    let sec = 7;
     $.content.innerHTML = `<div class="scan-card dc">
       <div class="scan-head"><div><div class="scan-title">Swing-trading desk</div>
         <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div>
-        ${breakouts.length + pullbacks.length + ipos.length ? `<button type="button" class="dc-tvb dc-tv-all" data-act="all"
-          title="One TradingView watchlist with a section per list (Breakout watch / Pullbacks / IPO bases) — TradingView: watchlist menu → Import list">⬇ TradingView watchlist · all 3 lists</button>` : ''}</div>
+        ${breakouts.length + pullbacks.length + ipos.length + weekly.length ? `<button type="button" class="dc-tvb dc-tv-all" data-act="all"
+          title="One TradingView watchlist with a section per list (Breakout watch / Pullbacks / IPO bases / Weekly trend) — TradingView: watchlist menu → Import list">⬇ TradingView watchlist · all 4 lists</button>` : ''}</div>
       <div class="dc-body">
         <div class="dc-answer"><span class="dc-dot r-${reg.level}"></span><div>
           <div class="dc-answer-t">Market: <b class="r-${reg.level}-t">${R.word}</b> — ${reg.pass} of ${reg.known} checks pass.</div>
@@ -1340,6 +1368,12 @@
             ADR ${IR.minAdr}–${IR.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${IR.maxWeek}% this week.
             The classic entry is a breakout above the post-listing high after a few quiet weeks; stop under the base low. Young stocks move fast — size smaller.</div>
           ${ipoTable(ipos)}</section>
+        <section class="dc-wide"><div class="dc-h3row"><h3>6 · Weekly trend — leaders above the 10-week SMA <span class="dc-muted">${weekly.length} stocks</span></h3>${tvButtons('wk', 25)}</div>
+          <div class="dc-note">Weekly timeframe: the weekly close is above a rising ${WR.sma}-week SMA (as on TradingView's weekly chart — this week's bar closes at the latest price),
+            RS ≥ ${WR.minRS}, ADR ${WR.minAdr}–${WR.maxAdr}%, ≥ ₹${S.minTurnoverCr} cr/day, not up > ${WR.maxWeek}% this week or > ${WR.maxMonth}% this month; strongest RS first.
+            A positional swing: hold while the weekly close stays above the 10-week line, exit on a weekly close below it.
+            <span class="dc-tag t-near10">Near 10W</span> = within ${WR.near}% of the line — the lower-risk entry; far above it, wait for a pullback toward the line.</div>
+          ${weeklyTable(weekly)}</section>
         ${extended.length ? `<section class="dc-wide"><h3>${sec++} · Don't chase — extended leaders</h3>
           <div class="dc-note">Up > 20% in a week or > ${S.maxMonth}% in a month: wait for a base or a pullback.</div>
           <div class="dc-chips">${ext}</div></section>` : ''}

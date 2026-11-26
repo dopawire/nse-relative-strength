@@ -1,7 +1,12 @@
 """RS maths: percentile rank, EMA flags, corporate-action breaks, ADR,
 equal-weight group index vs the benchmark."""
 
+import datetime as dt
+
 from rs_engine.config import EMA_PERIODS, ADR_PERIOD, CORP_ACTION_JUMP, ILLIQUID_TURNOVER_CR
+
+WEEKLY_SMA = 10          # weeks — the weekly 10 SMA (≈ the 50-day line)
+WEEKLY_SESSIONS = 160    # daily closes looked at: ~32 weeks, plenty for SMA10 + its streak
 
 
 def percentrank_inc(arr, x):
@@ -285,6 +290,52 @@ def setup_metrics(closes, highs, lows, volumes, since=None):
         if last > 0 and hi >= lo > 0:
             out["tt"] = round((hi - lo) / last * 100, 2)
     return out
+
+
+def week_key(day):
+    """ISO (year, week) of a YYYY-MM-DD session — weekly bars run Mon–Sun."""
+    y, w, _ = dt.date.fromisoformat(day).isocalendar()
+    return y, w
+
+
+def weekly_closes(closes, since=None, sessions=WEEKLY_SESSIONS):
+    """Weekly closes, oldest first, from the last `sessions` daily closes on or
+    after `since`: each week's last close; the running week's close is the
+    latest close (TradingView's weekly bar)."""
+    days = [d for d in sorted(closes) if since is None or d >= since][-sessions:]
+    out, last = [], None
+    for d in days:
+        k = week_key(d)
+        if k != last:
+            out.append(closes[d])
+            last = k
+        else:
+            out[-1] = closes[d]
+    return out
+
+
+def weekly_trend(wcl, period=WEEKLY_SMA):
+    """Weekly-timeframe trend from weekly closes (last = this week):
+
+      s  the 10-week SMA of weekly closes (this week included)
+      d  % the close is above (+) / below (−) it
+      u  1 if the SMA is rising vs last week's, else 0
+      n  weeks in a row the weekly close has held above the SMA (0 = below)
+
+    None with fewer than period + 1 weeks."""
+    if len(wcl) < period + 1:
+        return None
+    sma = [sum(wcl[j - period + 1:j + 1]) / period for j in range(period - 1, len(wcl))]
+    closes = wcl[period - 1:]                    # aligned with sma
+    n = 0
+    for c, m in zip(reversed(closes), reversed(sma)):
+        if c > m:
+            n += 1
+        else:
+            break
+    s = sma[-1]
+    return {"s": round(s, 2), "d": round((wcl[-1] / s - 1) * 100, 2) if s > 0 else None,
+            "u": 1 if sma[-1] > sma[-2] else 0, "n": n}
 
 
 def untraded_sessions(closes, volumes, window):

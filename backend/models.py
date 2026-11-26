@@ -47,6 +47,7 @@ class MemberOut(BaseModel):
     dla: float | None = None  # delivery %, 20-session average
     ev: str | None = None     # next corporate event within 14 days: "YYYY-MM-DD Results"
     ipo: dict | None = None   # mainboard IPO in the last year: {d, p, n, g, x}
+    wk: dict | None = None    # weekly 10-SMA trend: {s: SMA, d: % vs it, u: rising, n: weeks above}
 
 
 class GroupOut(BaseModel):

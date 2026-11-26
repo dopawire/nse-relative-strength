@@ -87,17 +87,28 @@ with:
   companies directly.  Backtest (250 sessions): +4.6% vs NIFTY 500 over 20
   sessions, 64% of picks beating it — but any recent IPO did +3.6% in this
   strong IPO year, so most of that is the IPO market, the screen adds ~1%.
+  **Weekly trend** — the weekly timeframe: the weekly close above a rising
+  10-week SMA (TradingView's weekly bar — Mon–Sun weeks, the running week
+  closes at the latest price; after a corporate action only post-break
+  weeks count), RS ≥ 90, ADR 2–8%, ≥ ₹5 cr/day, not up > 15% this week or
+  > 50% this month; strongest RS first, top 25 tracked.  Each row shows the
+  10W SMA, % above it and how many weekly closes in a row held above it;
+  *Near 10W* (≤ 5% above) marks the lower-risk entry, and stocks also in
+  the breakout watch are labelled.  Backtest (230 sessions, top 25): +3.1%
+  vs NIFTY 500 over 20 sessions (median +1.7%, 54% beat it) — RS-80 stocks
+  below their 10-week line did +1.2%, the average liquid stock +0.6%.  Only
+  a third of the list overlaps the breakout watch.
   **TradingView export:** each list has *Copy N for TradingView* (every
   stock that passes, in rank order, as `NSE:SYMBOL,…` — paste it into a
   watchlist's add-symbol box) and *⬇ .txt*; the header button saves all
-  three as one watchlist file with a `###` section per list (TradingView:
+  four as one watchlist file with a `###` section per list (TradingView:
   watchlist menu → *Import list*).  Symbols use TradingView's form — `&`
   and `-` become `_` (M&M → `NSE:M_M`, BAJAJ-AUTO → `NSE:BAJAJ_AUTO`), as
   does the level pages' *Copy for TradingView*.
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and
-  pullback / IPO-base lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
+  pullback / IPO-base / weekly-trend lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
   each regime.  `backfill_picks.py` rebuilt the year before live logging from
   price history with the same rules (marked as such).  The rules live in
   `rs_engine/decide.py`, so the pages, the log and the brief always agree.

@@ -27,7 +27,13 @@ SWING = {"minRS": 80, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 8, "minTurnoverCr
 # see it.  Its own screen: holding above the issue price, beating NIFTY 500
 # since listing, above every EMA it has, near its high since listing.
 IPO = {"minAge": 10, "maxAge": 250, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 10, "maxWeek": 15}
-N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS = 25, 15, 12, 15
+# Weekly trend: the weekly timeframe — weekly close above a rising 10-week
+# SMA (TradingView's weekly bar: the running week closes at the latest close),
+# RS leaders, tradeable range, not extended; ranked by RS rating.  Backtest
+# (230 sessions, top 25): +3.1% vs NIFTY 500 over 20 sessions, median +1.7%,
+# 54% beat it — vs +1.2% for RS-80 stocks below their 10-week line.
+WEEKLY = {"sma": 10, "minRS": 90, "minAdr": 2, "maxAdr": 8, "maxWeek": 15, "maxMonth": 50, "near": 5}
+N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS, N_WEEKLY = 25, 15, 12, 15, 25
 
 
 def median(xs):
@@ -191,6 +197,21 @@ def ipo_base(m):
         and (m.get("w1") is None or m["w1"] <= R["maxWeek"])
 
 
+def weekly_trend(m):
+    """The weekly-trend screen (see WEEKLY)."""
+    w, R = m.get("wk") or {}, WEEKLY
+    return w.get("d") is not None and w["d"] > 0 and w.get("u") == 1 \
+        and (m.get("rr") or 0) >= R["minRS"] and _range_ok(m, R["minAdr"], R["maxAdr"]) \
+        and _liquid(m) and (m.get("w1") is None or m["w1"] <= R["maxWeek"]) \
+        and (m.get("m1") is None or m["m1"] <= R["maxMonth"])
+
+
+def near_10w(m):
+    """Within WEEKLY["near"]% above the 10-week SMA — the low-risk entry."""
+    d = (m.get("wk") or {}).get("d")
+    return d is not None and 0 < d <= WEEKLY["near"]
+
+
 def tight(m):
     """10-session range within 2.5 average daily ranges: a quiet base."""
     return m.get("tt") is not None and bool(m.get("a")) and m["tt"] <= 2.5 * m["a"]
@@ -284,6 +305,7 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
     ipo = [m for m in stocks if ipo_base(m) and m["s"] not in in_brk]
     ipo.sort(key=lambda m: (-(10 * in_lead(m) - 1.5 * m["h"] + setup_bonus(m)
                               + 0.2 * min(m["ipo"]["x"], 100)), m["s"]))
+    wkl = sorted((m for m in live if weekly_trend(m)), key=lambda m: (-m["rr"], m["s"]))
     ext = [m for m in live if (m.get("rr") or 0) >= S["minRS"] and _liquid(m)
            and ((m.get("w1") or 0) > 20 or (m.get("m1") or 0) > S["maxMonth"])]
     ext.sort(key=lambda m: -(m.get("w1") or 0))
@@ -304,11 +326,13 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
         "pullbacks": [m["s"] for m in pb],
         "extended": [m["s"] for m in ext][:N_EXTENDED],
         "ipos": [m["s"] for m in ipo],
+        "weekly": [m["s"] for m in wkl],
         "rules": {k: list(v) if isinstance(v, tuple) else v for k, v in SWING.items()},
         "ipo_rules": dict(IPO),
+        "weekly_rules": dict(WEEKLY),
         "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge),
-                                         ("dhi", deliv_high), ("dlo", deliv_weak)) if f(m)]
-                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS] + ipo[:N_IPOS]},
+                                         ("dhi", deliv_high), ("dlo", deliv_weak), ("near10", near_10w)) if f(m)]
+                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS] + ipo[:N_IPOS] + wkl[:N_WEEKLY]},
     }
 
 

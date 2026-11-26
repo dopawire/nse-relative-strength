@@ -112,6 +112,12 @@ def compose(data, watch=None, save=True):
             i = ms.get(s, {}).get("ipo") or {}
             extra = f" · {pct(i['g'], 0)} vs issue, listed {day_txt(i['d'])}" if i.get("g") is not None else ""
             lines.append(row(s) + e(extra))
+    if d.get("weekly"):
+        lines += ["", f"<b>Weekly trend — above the 10-week SMA</b> ({len(d['weekly'])}) — top 3:"]
+        for s in d["weekly"][:3]:
+            w = ms.get(s, {}).get("wk") or {}
+            extra = f" · {pct(w['d'])} vs 10W, {w['n']} wk above" if w.get("d") is not None else ""
+            lines.append(row(s) + e(extra))
     if reg["level"] == "off":
         lines.append("<i>Risk-off: breakouts have only matched NIFTY on such days — be very selective.</i>")
 
@@ -122,6 +128,7 @@ def compose(data, watch=None, save=True):
     s20 = ((data.get("track") or {}).get("summary") or {}).get("20") or {}
     if s20.get("brk") and s20.get("focus"):
         ipo = f"IPO bases {pct(s20['ipo']['ex'] * 100)}, " if s20.get("ipo") else ""
+        ipo += f"weekly trend {pct(s20['wkl']['ex'] * 100)}, " if s20.get("wkl") else ""
         lines += ["", f"📈 <i>Track record (20 sessions): breakouts {pct(s20['brk']['ex'] * 100)} vs NIFTY 500, "
                       f"{ipo}focus sectors {pct(s20['focus']['avg'] * 100)} vs the average stock "
                       f"({s20['focus']['hit'] * 100:.0f}% of days).</i>"]

@@ -4,14 +4,16 @@ import watchlist
 
 
 def data(e20=1, h=3.0, ev=None):
-    m = {"s": "AAA", "n": "Aaa Ltd", "rr": 95, "h": h, "e": [e20, 1, 1, 1, 1], "d1": 1.2}
+    m = {"s": "AAA", "n": "Aaa Ltd", "rr": 95, "h": h, "e": [e20, 1, 1, 1, 1], "d1": 1.2,
+         "wk": {"s": 90.0, "d": 4.2, "u": 1, "n": 7}}
     if ev:
         m["ev"] = ev
     return {
         "levels": [{"key": "macro", "groups": [{"name": "X", "members": [m]}]}],
         "decide": {"asof": "2026-11-23", "regime": {"level": "mixed", "pass": 4, "known": 7},
                    "focus": ["Healthcare"], "turning": [], "avoid": ["Metals & Mining"],
-                   "cap": "Large", "breakouts": ["AAA"], "pullbacks": [], "tags": {"AAA": ["tight"]}},
+                   "cap": "Large", "breakouts": ["AAA"], "pullbacks": [], "weekly": ["AAA"],
+                   "tags": {"AAA": ["tight"]}},
         "flows": {"months": [{"m": "2026-11", "fii": 117622.1, "dii": -64547.2, "to": "2026-11-23"}]},
     }
 
@@ -23,6 +25,7 @@ def test_compose_brief(tmp_path, monkeypatch):
     assert "Healthcare · large caps" in txt and "Metals &amp; Mining" in txt    # escaped
     assert "+₹1,17,622 cr" in txt and "−₹64,547 cr" in txt
     assert "<b>AAA</b> RS 95, 3.0% off high, tight" in txt
+    assert "Weekly trend — above the 10-week SMA</b> (1)" in txt and "+4.2% vs 10W, 7 wk above" in txt
     assert send_brief.compose({"levels": []}, []) is None
 
 

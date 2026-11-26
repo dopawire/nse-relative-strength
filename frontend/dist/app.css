@@ -627,6 +627,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .t-dlo{background:var(--red-bg);color:var(--red)}
 .dc-sub2{display:block;font-size:10px;color:var(--text-muted)}
 .t-surge{background:var(--amber-bg);color:var(--amber)}
+.t-near10{background:var(--blue-bg);color:var(--blue)}
+.t-brk{background:var(--bg-inset);color:var(--text-soft);border:1px solid var(--border)}
 .dc-foot{margin-top:18px;font-size:11.5px;color:var(--text-muted);line-height:1.6}
 .dc .scan-table td:nth-child(2),.dc .scan-table th:nth-child(2),
 .dc .scan-table td:nth-child(3),.dc .scan-table th:nth-child(3),

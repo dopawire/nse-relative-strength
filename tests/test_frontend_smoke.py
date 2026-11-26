@@ -320,6 +320,9 @@ def test_focus_and_swing_pages(server, browser):
     assert page.inner_text(".scan-title") == "Swing-trading desk"
     heads = [h.inner_text() for h in page.query_selector_all(".dc-wide h3")]
     assert any(h.upper().startswith("5 · IPO BASES") for h in heads), heads
+    assert any(h.upper().startswith("6 · WEEKLY TREND") for h in heads), heads
+    assert any("WEEKLY TREND" in t.upper() for t in
+               [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")])
     track_rows = [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")]
     assert any("IPO BASES" in t.upper() for t in track_rows)
     # TradingView export: per-list copy / .txt and one sectioned watchlist file
@@ -337,6 +340,8 @@ def test_focus_and_swing_pages(server, browser):
             page.click("[data-act='all']")
         allt = open(dl.value.path()).read()
         assert allt.startswith("###Breakout watch,") and txt in allt
+        if page.query_selector("[data-tv='wk']"):
+            assert "###Weekly trend above 10W SMA," in allt
         page.click("[data-tv='brk'][data-act='copy']")
         page.wait_for_timeout(100)
         assert "Copied" in btn.inner_text() or "failed" in btn.inner_text()

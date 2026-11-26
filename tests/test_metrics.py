@@ -136,7 +136,52 @@ def test_backfill_record_matches_live_functions():
         sm = maths.setup_metrics(cut, hc, lc, vc)
         for key in ("vr", "vd", "tt"):
             assert r[key] == pytest.approx(sm[key])
+        assert r["wk"] == maths.weekly_trend(maths.weekly_closes(cut))
         assert not math.isnan(st.rr_score(r["_i"]))
+
+
+def test_weekly_trend_tradingview_style():
+    """Weekly bars Mon–Sun, the running week's close = the latest close;
+    SMA10 of weekly closes, rising flag, weeks in a row above it."""
+    import datetime as dt
+    start = dt.date(2026, 6, 1)                       # a Monday
+    c = {}
+    for w in range(14):                               # 14 weeks, Mon–Fri
+        for k in range(5):
+            c[(start + dt.timedelta(weeks=w, days=k)).isoformat()] = 100.0 + w * 10 + k
+    c["2026-09-07"] = 300.0                           # Mon of week 15: running week
+    wcl = maths.weekly_closes(c)
+    assert wcl == [104.0 + w * 10 for w in range(14)] + [300.0]
+    t = maths.weekly_trend(wcl)
+    sma = sum(wcl[-10:]) / 10
+    assert t["s"] == round(sma, 2) and t["d"] == round((300 / sma - 1) * 100, 2)
+    assert t["u"] == 1 and t["n"] == 6                # weeks 10–15 (all with an SMA) above
+    down = maths.weekly_trend(wcl[:-1] + [100.0])      # this week closes under the line
+    assert down["n"] == 0 and down["d"] < 0
+    assert maths.weekly_trend(wcl[:10]) is None       # needs 11 weeks
+    # after a corporate-action break only post-break closes count
+    assert maths.weekly_closes(c, since="2026-08-31") == [234.0, 300.0]
+
+
+def test_backfill_weekly_trend_after_a_split():
+    """A 1:2 split inside the window: live restarts at the break, the
+    backfill must too."""
+    import backfill_picks as bp
+    ds = days(320)
+    c = {d: 100.0 + i * 0.2 for i, d in enumerate(ds)}
+    for d in ds[-90:]:
+        c[d] /= 2
+    h = {d: v * 1.01 for d, v in c.items()}
+    lo = {d: v * 0.99 for d, v in c.items()}
+    vol = {d: 100_000 for d in ds}
+    bench = {d: 1000.0 for d in ds}
+    st = bp.Stock({"sym": "X", "name": "X", "sector": "S", "industry": "I"}, c, h, lo, vol, bench)
+    k = len(ds) - 1
+    r = st.record(ds[k], ds[k - 25], "Large", ds, k)
+    brk = maths.last_break_date(c, 252)
+    assert brk == ds[-90]
+    assert r["wk"] == maths.weekly_trend(maths.weekly_closes(c, since=brk))
+    assert r["wk"]["n"] >= 10                          # steady uptrend after the split
 
 
 def test_period_return_counts_market_sessions():
