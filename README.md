@@ -115,6 +115,20 @@ with:
   note: such runs often land in NSE's ASM list, and circuit limits can gap
   through a stop.  Illiquid / SME HTFs looked better on paper but are left
   out (operator-driven, untradeable at those prices).
+  **Early trigger:** while in the flag, the high of a tight 10-day range
+  (≤ 2.5 ADR) is shown as an earlier entry with its low as the stop
+  (the book's "early / aggressive entry"), and a close above it is marked.
+  NSE test (44 liquid cases): entry a median 8% below the pivot, 41%
+  reached 2× the risk before the stop (+0.24R vs +0.06R buying the pivot
+  with −8%), 20-day median +1.9% vs −1.5%, 68% went on to clear the pivot.
+  The range-low stop was a median 13% away and a tight −8% stop only broke
+  even, so the guidance is a smaller position, not a tighter stop.  Rows rank
+  dry-up first, then: pivot broken → early trigger hit → trigger set →
+  basing.  Breakout-day volume vs the flag (`vx`) is shown but not ranked —
+  in the test high-volume breakouts did no better.
+  **New listings:** a stock's first 10 sessions after listing (listing-day
+  volume is often 50–100× normal) are left out of every volume average —
+  volume ×, dry-up and the HTF flag/pole ratio (`maths.listing_vsince`).
   **TradingView export:** each list has *Copy N for TradingView* (every
   stock that passes, in rank order, as `NSE:SYMBOL,…` — paste it into a
   watchlist's add-symbol box) and *⬇ .txt*; the header button saves all

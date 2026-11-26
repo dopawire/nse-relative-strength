@@ -1316,9 +1316,19 @@
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
         <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${inIpo.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s IPO bases list — a listing under a year old">IPO base</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
+    const when = k => k === 0 ? `${fmtDay(D.asof)} close` : `${k}d before ${fmtDay(D.asof)}`;
+    const volX = x => x == null ? '' : ` · ${x.toFixed(1)}× vol`;
     const htfState = h => h.bo == null
       ? `<span class="tnum">${(-h.dist).toFixed(1)}% below</span><span class="dc-sub2">in the flag</span>`
-      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">${h.bo === 0 ? `broke out on the ${fmtDay(D.asof)} close` : `broke out ${h.bo} session${h.bo > 1 ? 's' : ''} before ${fmtDay(D.asof)}`}</span>`;
+      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">broke out ${when(h.bo)}${volX(h.vx)}</span>`;
+    // early trigger: the high of a tight 10-day range inside the flag (stop: its low)
+    const htfEarly = (h, price) => {
+      if (h.bo != null || h.et == null) return '<span class="dc-muted">—</span>';
+      const risk = price ? ` (${((1 - h.es / price) * 100).toFixed(0)}% risk)` : '';
+      return h.eb != null
+        ? `<b class="tnum">${utils.fmtPrice(h.et)} hit</b><span class="dc-sub2">${when(h.eb)} · stop ${utils.fmtPrice(h.es)}${risk}</span>`
+        : `<span class="tnum">${utils.fmtPrice(h.et)}</span><span class="dc-sub2" title="a close above it is the early entry">stop ${utils.fmtPrice(h.es)}</span>`;
+    };
     const htfTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
       <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
         <th title="RS rating 1-99 vs all stocks">RS</th>
@@ -1326,6 +1336,7 @@
         <th title="deepest pullback from the pole high, and sessions since the pole high">Flag</th>
         <th title="the pole high — the breakout level (set your alert here)">Pivot</th>
         <th title="the last close vs the pivot — completed sessions only (the data updates after the 15:30 close)">vs pivot</th>
+        <th title="the high of a tight 10-day range inside the flag (≤ 2.5 ADR): a close above it is the early, lower-priced entry; stop under the range low">Early trigger</th>
         <th title="average volume in the flag ÷ average volume in the pole — under 0.7 = drying up">Flag vol</th>
         <th title="average daily range, 20 days — size the stop with it">ADR</th>
         <th title="average daily traded value, 20 sessions">₹ cr/day</th><th>Setup</th></tr></thead>
@@ -1339,6 +1350,7 @@
         <td class="tnum">−${m.htf.fd.toFixed(0)}%<span class="dc-sub2">${m.htf.fw} sessions</span></td>
         <td class="tnum">${utils.fmtPrice(m.htf.p)}</td>
         <td>${htfState(m.htf)}</td>
+        <td>${htfEarly(m.htf, m.l)}</td>
         <td class="tnum">${m.htf.dry == null ? '—' : m.htf.dry.toFixed(2) + '×'}</td>
         <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
@@ -1413,6 +1425,8 @@
             buy the first close above the pivot (the pole high). Listed while in the flag, and for ${HR.boDays} sessions after a breakout that holds. ≥ ₹${S.minTurnoverCr} cr/day only.
             <span class="dc-tag t-vdry">Flag vol dry-up</span> ranks first — in the NSE test (86 breakouts, 2024–26) those beat NIFTY 500 by +6.8% over 20 sessions and 26% went +50% within 3 months
             (without dry-up +2.8%, 15%); but the median trade was flat, so use a stop (≈ 8% / under the flag low) and let the few big winners run.
+            <b>Early trigger</b> — a close above a tight 10-day range inside the flag gets you in a median 8% below the pivot: in the test (44 cases) 41% reached 2× the risk before the stop
+            (+0.24R a trade vs +0.06R buying the pivot), and 68% went on to clear the pivot. The stop is the range low — often 10–13% away, and a tighter stop just got shaken out — so take a smaller position.
             <b>India check:</b> a stock up 100% in weeks is often put in NSE's <b>ASM</b> list (higher margin, sometimes trade-for-trade) — look it up before buying; circuit limits can gap through a stop.</div>
           ${htfTable(htfs)}</section>
         ${extended.length ? `<section class="dc-wide"><h3>${sec++} · Don't chase — extended leaders</h3>

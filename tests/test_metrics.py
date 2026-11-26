@@ -319,3 +319,62 @@ def test_backfill_htf_matches_live():
         r = st.record(ds[k], ds[k - 25], "Large")
         assert r["htf"] == maths.htf_from_series(cut, h, lo, vol)
     assert r["htf"]["bo"] is None and st.record(ds[-1], ds[-26], "Large")["htf"]["bo"] == 1
+
+
+def _early_bars(extra=()):
+    """Flat 100 → pole to 210 → a dip to ~185, then 12 tight sessions at
+    189–191 (high/low ±2%: ADR ≈ 4%) — a tight range inside the flag."""
+    c = [100.0] * 40 + [100 + 110 * k / 30 for k in range(1, 31)]
+    c += [205.0, 198.0, 192.0, 186.0, 185.0, 188.0, 187.0, 189.0]
+    c += [190.0, 189.0, 191.0, 190.0, 189.5, 190.5, 191.0, 189.0, 190.0, 190.5, 189.5, 190.0]
+    v = [100_000] * 40 + [150_000] * 30 + [50_000] * 20
+    c += list(extra)
+    v += [120_000] * len(extra)
+    return c, [x * 1.02 for x in c], [x * 0.98 for x in c], v
+
+
+def test_htf_early_trigger_set_then_hit():
+    r = maths.htf_state(*_early_bars())
+    assert r["bo"] is None and r["eb"] is None
+    assert r["et"] == pytest.approx(191.0 * 1.02) and r["es"] == pytest.approx(189.0 * 0.98)
+    hit = maths.htf_state(*_early_bars(extra=(200.0,)))      # over the range, under the 214 pivot
+    assert hit["bo"] is None and hit["eb"] == 0 and hit["et"] == pytest.approx(191.0 * 1.02)
+    assert hit["vx"] == pytest.approx(120_000 / 50_000)      # vs the flag's average volume
+    later = maths.htf_state(*_early_bars(extra=(200.0, 203.0)))
+    assert later["eb"] == 1 and later["et"] == r["et"]       # the FIRST break is kept
+    failed = maths.htf_state(*_early_bars(extra=(200.0, 180.0)))
+    assert failed["eb"] is None                              # fell back under the range low
+    piv = maths.htf_state(*_early_bars(extra=(200.0, 220.0)))
+    assert piv["bo"] == 0 and piv["et"] is None and piv["vx"] is not None
+
+
+def test_listing_volume_left_out():
+    cal = days(80)
+    c = {d: 100.0 for d in cal[20:]}                         # listed 20 sessions after the history starts
+    vol = {d: (90_000_000 if i < 10 else 500_000) for i, d in enumerate(cal[20:])}
+    vs = maths.listing_vsince(c, cal[0])
+    assert vs == cal[30] and maths.listing_vsince({d: 1.0 for d in cal}, cal[0]) is None
+    hl = {d: 101.0 for d in c}
+    ll = {d: 99.0 for d in c}
+    with_frenzy = maths.setup_metrics(c, hl, ll, vol)
+    without = maths.setup_metrics(c, hl, ll, vol, vsince=vs)
+    assert with_frenzy["vr"] < 0.5 and without["vr"] == pytest.approx(1.0)   # one 90M day in the 50
+
+
+def test_backfill_new_listing_matches_live():
+    import backfill_picks as bp
+    cal = days(200)
+    c0, h0, l0, v0 = _early_bars(extra=(200.0,))
+    ds = cal[-len(c0):]
+    c, h, lo = dict(zip(ds, c0)), dict(zip(ds, h0)), dict(zip(ds, l0))
+    vol = dict(zip(ds, v0))
+    vol[ds[0]] = 50_000_000                                  # listing-day frenzy
+    bench = {d: 1000.0 for d in cal}
+    st = bp.Stock({"sym": "N", "name": "N", "sector": "S", "industry": "I"}, c, h, lo, vol, bench)
+    k = len(cal) - 1
+    r = st.record(cal[k], cal[k - 25], "Small", cal, k)
+    vs = maths.listing_vsince(c, cal[0])
+    assert vs == ds[10]
+    assert r["htf"] == maths.htf_from_series(c, h, lo, vol, vsince=vs) and r["htf"]["eb"] == 0
+    sm = maths.setup_metrics(c, h, lo, vol, vsince=vs)
+    assert r["vr"] == pytest.approx(sm["vr"]) and r["vd"] == pytest.approx(sm["vd"])

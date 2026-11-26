@@ -55,7 +55,7 @@ from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs, period_return, avg_turnover_cr, index_trend,
                              setup_metrics, is_illiquid, ipo_metrics, weekly_closes, weekly_trend,
-                             htf_from_series,
+                             htf_from_series, listing_vsince,
                              rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -1184,9 +1184,11 @@ def main():
                                          raw_first=nse_archive.raw_close(arc, sym, min(ser))),
                       "wk": weekly_trend(weekly_closes(ser, since=brk)),
                       "htf": htf_from_series(ser, highs.get(sym, {}), lows.get(sym, {}),
-                                             volumes.get(sym, {}), since=brk),
+                                             volumes.get(sym, {}), since=brk,
+                                             vsince=listing_vsince(ser, min(bench))),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
-                                      volumes.get(sym, {}), since=brk),
+                                      volumes.get(sym, {}), since=brk,
+                                      vsince=listing_vsince(ser, min(bench))),
                       **nse_archive.delivery_metrics(arc.get(sym), ref_dates[-1])}
             stock_cache[sym] = st
         st = stock_cache[sym]

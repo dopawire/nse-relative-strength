@@ -5,6 +5,7 @@ import datetime as dt
 
 from rs_engine.config import EMA_PERIODS, ADR_PERIOD, CORP_ACTION_JUMP, ILLIQUID_TURNOVER_CR
 
+LISTING_SKIP = 10        # a new listing's first sessions: frenzy volume, left out of volume averages
 WEEKLY_SMA = 10          # weeks — the weekly 10 SMA (≈ the 50-day line)
 WEEKLY_SESSIONS = 160    # daily closes looked at: ~32 weeks, plenty for SMA10 + its streak
 
@@ -262,7 +263,16 @@ def index_trend(closes_by_date):
             "off_high": round((1 - price / hi) * 100, 2) if hi else None}
 
 
-def setup_metrics(closes, highs, lows, volumes, since=None):
+def listing_vsince(closes, first_session):
+    """For a stock listed after `first_session` (the start of the price
+    history), the date its volume averages may start: after its first
+    LISTING_SKIP sessions — listing-day volume (often 50–100× normal) would
+    otherwise swamp every average for months.  None for older stocks."""
+    ds = sorted(closes)
+    return ds[LISTING_SKIP] if ds and ds[0] > first_session and len(ds) > LISTING_SKIP else None
+
+
+def setup_metrics(closes, highs, lows, volumes, since=None, vsince=None):
     """Breakout-readiness gauges for one stock ({date: value} each):
 
       vr  today's volume ÷ the 50 sessions before it   (≥ 1.5 = volume surge)
@@ -271,8 +281,10 @@ def setup_metrics(closes, highs, lows, volumes, since=None):
 
     Zero-volume days count (an untraded day is real information).  None
     where there isn't enough history (after `since`, a corporate-action
-    break, prices before it are a different security)."""
-    days = [d for d in sorted(closes) if d in volumes and (since is None or d >= since)]
+    break, prices before it are a different security).  `vsince`: volume
+    averages start there (a new listing's first sessions — listing_vsince)."""
+    days = [d for d in sorted(closes) if d in volumes and (since is None or d >= since)
+            and (vsince is None or d >= vsince)]
     out = {"vr": None, "vd": None, "tt": None}
     if len(days) >= 31:
         v = [volumes[d] for d in days]
@@ -339,7 +351,8 @@ def weekly_trend(wcl, period=WEEKLY_SMA):
 
 
 HTF = {"minPole": 100.0, "poleSessions": 45, "maxFlag": 25.0, "flagMin": 4, "flagMax": 40,
-       "boDays": 5, "boHold": 5.0, "boMax": 15.0, "dry": 0.7}
+       "boDays": 5, "boHold": 5.0, "boMax": 15.0, "dry": 0.7,
+       "innerDays": 10, "innerAdr": 2.5}
 HTF_SESSIONS = 100       # bars htf_state needs: breakout look-back + flag + pole
 
 
@@ -350,6 +363,20 @@ def _last_index(xs, x, i0, i1):
         if xs[j] == x:
             return j
     return i0
+
+
+def _inner_range(c, h, lo, end, R):
+    """The flag's last `innerDays` bars ending at `end`: (high, low) when that
+    range is tight — within innerAdr × the 20-day ADR — else None."""
+    s0 = end - R["innerDays"] + 1
+    if s0 < 0 or c[end] <= 0:
+        return None
+    hi_, lo_ = max(h[s0:end + 1]), min(lo[s0:end + 1])
+    ratios = [h[j] / lo[j] for j in range(max(0, end - 19), end + 1) if lo[j] > 0 and h[j] > lo[j]]
+    if len(ratios) < 10:
+        return None
+    adr = (sum(ratios) / len(ratios) - 1) * 100
+    return (hi_, lo_) if (hi_ - lo_) / c[end] * 100 <= R["innerAdr"] * adr else None
 
 
 def _htf_at(c, h, lo, b, R):
@@ -385,6 +412,14 @@ def htf_state(c, h, lo, v, R=HTF):
       dist today's close vs the pivot, % (negative = still below it)
       dry  flag ÷ pole average volume (< 0.7 = drying up)
       bo   sessions since the breakout, None while still in the flag
+      et   early trigger: the high of a tight range late in the flag (the
+           last innerDays sessions within innerAdr × ADR) — an earlier,
+           lower-risk entry than the pivot (the model book's "early /
+           aggressive entry")
+      es   its stop: the low of that range
+      eb   sessions since a close above et (still under the pivot), or None
+      vx   volume on that breakout session (pivot or early) ÷ the flag's
+           average volume before it — the confirmation (≥ 1.5 = strong)
 
     None if no setup, or a corporate-action jump lies inside it."""
     n = len(c)
@@ -392,7 +427,12 @@ def htf_state(c, h, lo, v, R=HTF):
         return None
     t = n - 1
 
-    def pack(P, p, pl, gain, depth, bo):
+    def vx_at(b):
+        """Breakout-day volume ÷ the flag's average volume before it."""
+        fv = [x for x in v[p + 1:b] if x is not None]
+        return round(v[b] / (sum(fv) / len(fv)), 2) if v[b] is not None and fv and sum(fv) > 0 else None
+
+    def pack(P, p, pl, gain, depth, bo, early=(None, None, None)):
         if any(c[j - 1] > 0 and abs(c[j] / c[j - 1] - 1) > CORP_ACTION_JUMP for j in range(pl + 1, n)):
             return None
         pv = [x for x in v[pl:p + 1] if x is not None]
@@ -400,7 +440,10 @@ def htf_state(c, h, lo, v, R=HTF):
         dry = (sum(fv) / len(fv)) / (sum(pv) / len(pv)) if pv and fv and sum(pv) > 0 else None
         return {"p": round(P, 2), "g": round(gain, 1), "pw": p - pl, "fd": round(depth, 1),
                 "fw": t - p, "dist": round((c[t] / P - 1) * 100, 2),
-                "dry": None if dry is None else round(dry, 2), "bo": bo}
+                "dry": None if dry is None else round(dry, 2), "bo": bo,
+                "et": None if early[0] is None else round(early[0], 2),
+                "es": None if early[1] is None else round(early[1], 2), "eb": early[2],
+                "vx": vx_at(t - bo) if bo is not None else vx_at(t - early[2]) if early[2] is not None else None}
 
     # broke out within the last boDays sessions (the first close above the pivot)
     for k in range(R["boDays"]):
@@ -434,16 +477,34 @@ def htf_state(c, h, lo, v, R=HTF):
     depth = (1 - min(lo[p:t + 1]) / P) * 100
     if gain < R["minPole"] or depth > R["maxFlag"]:
         return None
-    return pack(P, p, pl, gain, depth, None)
+    # early trigger: a close above a tight range inside the flag within the
+    # last boDays sessions (still under the pivot) — else the current tight
+    # range's high is the trigger for the next session
+    early = (None, None, None)
+    for k in reversed(range(R["boDays"])):            # oldest first: the FIRST break counts
+        b = t - k
+        if b - R["innerDays"] <= p:
+            continue                                   # the range must lie inside the flag
+        rng = _inner_range(c, h, lo, b - 1, R)
+        if rng and c[b] > rng[0] and c[t] >= rng[1] and all(c[j] <= rng[0] for j in range(b - R["innerDays"], b)):
+            early = (rng[0], rng[1], k)
+            break
+    if early[0] is None and t - R["innerDays"] + 1 > p:
+        rng = _inner_range(c, h, lo, t, R)
+        if rng:
+            early = (rng[0], rng[1], None)
+    return pack(P, p, pl, gain, depth, None, early)
 
 
-def htf_from_series(closes, highs, lows, volumes, since=None):
+def htf_from_series(closes, highs, lows, volumes, since=None, vsince=None):
     """htf_state on {date: value} series: the last HTF_SESSIONS sessions on or
-    after `since`; a missing high / low falls back to the close."""
+    after `since`; a missing high / low falls back to the close; volume before
+    `vsince` (a new listing's first sessions) is left out."""
     days = [d for d in sorted(closes) if since is None or d >= since][-HTF_SESSIONS:]
     c = [closes[d] for d in days]
     return htf_state(c, [highs.get(d, closes[d]) for d in days],
-                     [lows.get(d, closes[d]) for d in days], [volumes.get(d) for d in days])
+                     [lows.get(d, closes[d]) for d in days],
+                     [volumes.get(d) if vsince is None or d >= vsince else None for d in days])
 
 
 def untraded_sessions(closes, volumes, window):

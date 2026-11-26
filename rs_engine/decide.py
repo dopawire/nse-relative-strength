@@ -38,6 +38,11 @@ WEEKLY = {"sma": 10, "minRS": 90, "minAdr": 2, "maxAdr": 8, "maxWeek": 15, "maxM
 # vs NIFTY 500 over 20 sessions; with volume drying up in the flag +6.8%, 37%
 # reached +20% before −8% and 26% went +50% within 3 months (without: +2.8%,
 # 29%, 15%; ordinary breakouts: 24%, 6%).  Fat tail, median ≈ flat — stops.
+# Early trigger (a close above a tight 10-day range inside the flag, stop at
+# its low): 44 entries, 41% reached 2R before the stop (+0.24R vs +0.06R at
+# the pivot with −8%), 20-day median +1.9% vs −1.5%, 68% went on to clear the
+# pivot — but that stop sat a median 13% away (a tight −8% stop broke even):
+# size the position to the wider stop.
 HTF_RULES = {"minPole": 100, "poleWeeks": 9, "maxFlag": 25, "flagWeeks": [1, 8], "dry": 0.7,
              "boDays": 5}
 N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS, N_WEEKLY, N_HTF = 25, 15, 12, 15, 25, 15
@@ -219,6 +224,13 @@ def htf_dry(m):
     return d is not None and d < HTF_RULES["dry"]
 
 
+def htf_stage(m):
+    """0 broke the pivot, 1 hit the early trigger, 2 tight with a trigger
+    set, 3 still basing — the order to look at them."""
+    h = m.get("htf") or {}
+    return 0 if h.get("bo") is not None else 1 if h.get("eb") is not None else 2 if h.get("et") else 3
+
+
 def near_10w(m):
     """Within WEEKLY["near"]% above the 10-week SMA — the low-risk entry."""
     d = (m.get("wk") or {}).get("d")
@@ -321,7 +333,7 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
     wkl = sorted((m for m in live if weekly_trend(m)), key=lambda m: (-m["rr"], m["s"]))
     # HTF: drying volume first, then nearest the pivot (fresh breakouts lead)
     htf = sorted((m for m in stocks if m.get("htf") and _liquid(m) and not m.get("nw")),
-                 key=lambda m: (not htf_dry(m), -m["htf"]["dist"], m["s"]))
+                 key=lambda m: (not htf_dry(m), htf_stage(m), -m["htf"]["dist"], m["s"]))
     ext = [m for m in live if (m.get("rr") or 0) >= S["minRS"] and _liquid(m)
            and ((m.get("w1") or 0) > 20 or (m.get("m1") or 0) > S["maxMonth"])]
     ext.sort(key=lambda m: -(m.get("w1") or 0))

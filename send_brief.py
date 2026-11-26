@@ -128,6 +128,9 @@ def compose(data, watch=None, save=True):
                      else f"broke out {day_txt(d['asof'])[:-5]}" if h["bo"] == 0
                      else f"broke out {h['bo']} session(s) before {day_txt(d['asof'])[:-5]}")
             dry = ", vol drying" if h.get("dry") is not None and h["dry"] < 0.7 else ""
+            if h.get("bo") is None and h.get("et") is not None:
+                state += (f", early trigger {h['et']:g} hit" if h.get("eb") is not None
+                          else f", early trigger {h['et']:g}") + f" (stop {h['es']:g})"
             lines.append(row(s) + e(f" · pole +{h['g']:.0f}%, flag −{h['fd']:.0f}%, {state}{dry} · ASM?"))
     if reg["level"] == "off":
         lines.append("<i>Risk-off: breakouts have only matched NIFTY on such days — be very selective.</i>")

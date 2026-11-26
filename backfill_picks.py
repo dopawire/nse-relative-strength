@@ -26,7 +26,7 @@ import build_rs as B
 from rs_engine import decide, flows, nse_archive, track
 from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, ILLIQUID_TURNOVER_CR, WINDOW
 from rs_engine.maths import (HTF_SESSIONS, WEEKLY_SESSIONS, htf_state, index_trend, ipo_metrics,
-                             week_key, weekly_trend)
+                             listing_vsince, week_key, weekly_trend)
 
 
 def _emas(vals, period):
@@ -61,7 +61,9 @@ class Stock:
         # aligned bars for maths.htf_from_series (missing high / low → close)
         self.h_arr = [hi.get(d, x) for d, x in zip(self.ds, self.c)]
         self.l_arr = [lo.get(d, x) for d, x in zip(self.ds, self.c)]
-        self.v_arr = [vol.get(d) for d in self.ds]
+        # a new listing's first sessions stay out of volume averages (maths.listing_vsince)
+        self.vsince = listing_vsince(ser, min(bench)) if bench else None
+        self.v_arr = [vol.get(d) if self.vsince is None or d >= self.vsince else None for d in self.ds]
         common = [i for i, d in enumerate(self.ds) if d in bench]
         self.rs_i = common
         ratios = [self.c[i] / bench[self.ds[i]] for i in common]
@@ -131,7 +133,8 @@ class Stock:
               / len(vdays) / 1e7) if len(vdays) >= 10 else None
         # breakout readiness (as maths.setup_metrics)
         vr = vd = tt = None
-        vi = [d for d in self.ds[max(0, i - 59):i + 1] if d in self.vol and d >= since]
+        vi = [d for d in self.ds[max(0, i - 59):i + 1] if d in self.vol and d >= since
+              and (self.vsince is None or d >= self.vsince)]
         if len(vi) >= 31:
             v = [self.vol[d] for d in vi]
             prior = v[-51:-1]

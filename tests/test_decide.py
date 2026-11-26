@@ -237,3 +237,13 @@ def test_htf_list():
     assert "vdry" in d["tags"]["HNEAR"] and "vdry" not in d["tags"].get("HWET", [])
     assert d["htf_rules"]["minPole"] == 100
     assert track.pick_record({**d, "asof": "2026-11-26"})["htf"] == d["htf"]
+
+
+def test_htf_stage_order():
+    a = htf_stock("STAGE3", dist=-2)                          # basing, no trigger
+    b = htf_stock("STAGE2", dist=-9)
+    b["htf"].update(et=480.0, es=455.0)                       # tight, trigger set
+    c = htf_stock("STAGE1", dist=-6)
+    c["htf"].update(et=470.0, es=450.0, eb=0)                 # early trigger hit
+    d = decide.analyse(universe() + [a, b, c])
+    assert d["htf"] == ["STAGE1", "STAGE2", "STAGE3"]
