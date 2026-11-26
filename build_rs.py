@@ -49,7 +49,7 @@ import requests
 # ---- rs_engine: computation core (re-exported here for compatibility) ----
 from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
                               APPEND_RANGE, MIN_BARS, EMA_PERIODS, BENCHMARK_NAME, BENCH_YSYM,
-                              YH_WORKERS, IST, is_holiday, standard_name,
+                              YH_WORKERS, IST, is_holiday, latest_session, standard_name,
                               standard_company)
 from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
@@ -245,7 +245,12 @@ def _session():
 def yahoo_closes(ysym, rng, volumes=None):
     """Fetch a Yahoo ticker over `rng`. Returns (closes, highs, lows, err), each a
     {date: value} map. Highs feed the 52-week metric; highs+lows feed ADR%.
-    `volumes` (a dict) also receives {date: shares traded} from the same reply."""
+    `volumes` (a dict) also receives {date: shares traded} from the same reply.
+
+    Only COMPLETED sessions: during market hours Yahoo's daily chart carries
+    today's live bar (close = the current price) — it is dropped until the
+    session has settled (config.latest_session: today from 16:00 IST), so a
+    build run before the close never mixes an unfinished day into the data."""
     url = YH_URL.format(sym=requests.utils.quote(ysym), rng=rng)
     for attempt in range(4):
         try:
@@ -272,10 +277,13 @@ def yahoo_closes(ysym, rng, volumes=None):
         lw = quote.get("low") or []
         vl = quote.get("volume") or []
         out, hi, lo = {}, {}, {}
+        done = latest_session()
         for i, (t, c) in enumerate(zip(ts, cl)):
             if c is None:
                 continue
             day = dt.datetime.fromtimestamp(int(t), IST).strftime("%Y-%m-%d")
+            if day > done:
+                continue                              # today, still trading
             out[day] = float(c)
             h = hg[i] if i < len(hg) else None
             lwv = lw[i] if i < len(lw) else None

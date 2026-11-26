@@ -1318,14 +1318,14 @@
       : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
     const htfState = h => h.bo == null
       ? `<span class="tnum">${(-h.dist).toFixed(1)}% below</span><span class="dc-sub2">in the flag</span>`
-      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">${h.bo === 0 ? 'broke out today' : `broke out ${h.bo}d ago`}</span>`;
+      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">${h.bo === 0 ? `broke out on the ${fmtDay(D.asof)} close` : `broke out ${h.bo} session${h.bo > 1 ? 's' : ''} before ${fmtDay(D.asof)}`}</span>`;
     const htfTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
       <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
         <th title="RS rating 1-99 vs all stocks">RS</th>
         <th title="the run-up: low to the pole high, and how many sessions it took">Pole</th>
         <th title="deepest pullback from the pole high, and sessions since the pole high">Flag</th>
         <th title="the pole high — the breakout level (set your alert here)">Pivot</th>
-        <th title="today's close vs the pivot">vs pivot</th>
+        <th title="the last close vs the pivot — completed sessions only (the data updates after the 15:30 close)">vs pivot</th>
         <th title="average volume in the flag ÷ average volume in the pole — under 0.7 = drying up">Flag vol</th>
         <th title="average daily range, 20 days — size the stop with it">ADR</th>
         <th title="average daily traded value, 20 sessions">₹ cr/day</th><th>Setup</th></tr></thead>

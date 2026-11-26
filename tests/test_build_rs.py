@@ -144,6 +144,31 @@ def test_yahoo_closes_skips_null_close(monkeypatch):
     assert "2026-07-28" not in highs and "2026-07-28" not in lows
 
 
+def test_yahoo_closes_drops_the_session_still_trading(monkeypatch):
+    """At 11:00 on 29 Jul Yahoo's daily chart already has a 29 Jul bar (the
+    live price): it must not enter the data until that session has closed."""
+    import build_rs
+    payload = {"chart": {"result": [{
+        "timestamp": [_ts(2026, 7, 27), _ts(2026, 7, 28), _ts(2026, 7, 29)],
+        "indicators": {"quote": [{"close": [100.0, 101.0, 99.0], "high": [101.0, 102.0, 103.0],
+                                  "low": [99.0, 100.0, 98.0], "volume": [10, 20, 5]}]},
+    }]}}
+    patch_session(monkeypatch, FakeSession(FakeResp(200, payload=payload)))
+    monkeypatch.setattr(build_rs, "latest_session", lambda now=None: "2026-07-28")
+    vols = {}
+    closes, highs, lows, err = yahoo_closes("X.NS", "1mo", volumes=vols)
+    assert err is None and sorted(closes) == ["2026-07-27", "2026-07-28"]
+    assert "2026-07-29" not in highs and "2026-07-29" not in lows and "2026-07-29" not in vols
+
+
+def test_latest_session_waits_for_the_close():
+    import datetime as dt2
+    from rs_engine.config import latest_session as ls
+    wed = dt2.datetime(2026, 11, 25, 11, 0, tzinfo=IST)          # Wednesday, market open
+    assert ls(wed) == "2026-11-23"                                 # 24 Nov was a holiday
+    assert ls(wed.replace(hour=16, minute=5)) == "2026-11-25"     # settled after the close
+
+
 def test_yahoo_closes_null_highlow_falls_back_to_close(monkeypatch):
     payload = {"chart": {"result": [{
         "timestamp": [_ts(2026, 7, 27)],
