@@ -26,7 +26,7 @@ import build_rs as B
 from rs_engine import decide, flows, nse_archive, track
 from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, ILLIQUID_TURNOVER_CR, WINDOW
 from rs_engine.maths import (HTF_SESSIONS, WEEKLY_SESSIONS, htf_state, index_trend, ipo_metrics,
-                             listing_vsince, week_key, weekly_trend)
+                             htf_dates, listing_vsince, week_key, weekly_trend)
 
 
 def _emas(vals, period):
@@ -155,8 +155,8 @@ class Stock:
         wcl = [self.c[j] for j in self.wend[bisect_left(self.wend, start):bisect_left(self.wend, i)]]
         wk = weekly_trend(wcl + [self.c[i]])
         hs0 = max(i - HTF_SESSIONS + 1, bisect_left(self.ds, since), 0)
-        htf = htf_state(self.c[hs0:i + 1], self.h_arr[hs0:i + 1], self.l_arr[hs0:i + 1],
-                        self.v_arr[hs0:i + 1])
+        htf = htf_dates(htf_state(self.c[hs0:i + 1], self.h_arr[hs0:i + 1], self.l_arr[hs0:i + 1],
+                                  self.v_arr[hs0:i + 1]), self.ds[hs0:i + 1])
         nw = None
         if self.ds[0] > window_start:
             nw = len([d for d in self.ds[:i + 1] if d >= window_start])

@@ -1316,18 +1316,19 @@
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
         <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${inIpo.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s IPO bases list — a listing under a year old">IPO base</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
-    const when = k => k === 0 ? `${fmtDay(D.asof)} close` : `${k}d before ${fmtDay(D.asof)}`;
+    const when = d => d ? `${fmtDay(d)} close` : '';
     const volX = x => x == null ? '' : ` · ${x.toFixed(1)}× vol`;
     const htfState = h => h.bo == null
       ? `<span class="tnum">${(-h.dist).toFixed(1)}% below</span><span class="dc-sub2">in the flag</span>`
-      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">broke out ${when(h.bo)}${volX(h.vx)}</span>`;
+      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">broke out ${when(h.bod)}${volX(h.vx)}</span>`;
     // early trigger: the high of a tight 10-day range inside the flag (stop: its low)
-    const htfEarly = (h, price) => {
+    const htfEarly = h => {
       if (h.et == null || (h.bo != null && h.eb == null)) return '<span class="dc-muted">—</span>';
-      const risk = price ? ` (${((1 - h.es / price) * 100).toFixed(0)}% risk)` : '';
+      // risk of the early entry: trigger → stop (not today's price → stop)
+      const risk = ` (${((1 - h.es / h.et) * 100).toFixed(0)}% risk)`;
       return h.eb != null
-        ? `<b class="tnum">${utils.fmtPrice(h.et)} hit</b><span class="dc-sub2">${when(h.eb)} · stop ${utils.fmtPrice(h.es)}${risk}</span>`
-        : `<span class="tnum">${utils.fmtPrice(h.et)}</span><span class="dc-sub2" title="a close above it is the early entry">stop ${utils.fmtPrice(h.es)}</span>`;
+        ? `<b class="tnum">${utils.fmtPrice(h.et)} hit</b><span class="dc-sub2">${when(h.ebd)} · stop ${utils.fmtPrice(h.es)}${risk}</span>`
+        : `<span class="tnum">${utils.fmtPrice(h.et)}</span><span class="dc-sub2" title="a close above it is the early entry">stop ${utils.fmtPrice(h.es)}${risk}</span>`;
     };
     const htfTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
       <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
@@ -1350,7 +1351,7 @@
         <td class="tnum">−${m.htf.fd.toFixed(0)}%<span class="dc-sub2">${m.htf.fw} sessions</span></td>
         <td class="tnum">${utils.fmtPrice(m.htf.p)}</td>
         <td>${htfState(m.htf)}</td>
-        <td>${htfEarly(m.htf, m.l)}</td>
+        <td>${htfEarly(m.htf)}</td>
         <td class="tnum">${m.htf.dry == null ? '—' : m.htf.dry.toFixed(2) + '×'}</td>
         <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>

@@ -6,7 +6,8 @@ import watchlist
 def data(e20=1, h=3.0, ev=None):
     m = {"s": "AAA", "n": "Aaa Ltd", "rr": 95, "h": h, "e": [e20, 1, 1, 1, 1], "d1": 1.2,
          "wk": {"s": 90.0, "d": 4.2, "u": 1, "n": 7},
-         "htf": {"p": 100.0, "g": 140.0, "pw": 30, "fd": 14.0, "fw": 12, "dist": -2.5, "dry": 0.5, "bo": None}}
+         "htf": {"p": 100.0, "g": 140.0, "pw": 30, "fd": 14.0, "fw": 12, "dist": -2.5, "dry": 0.5, "bo": None,
+                 "et": 98.0, "es": 92.0, "eb": 0, "ebd": "2026-11-23", "bod": None}}
     if ev:
         m["ev"] = ev
     return {
@@ -27,7 +28,8 @@ def test_compose_brief(tmp_path, monkeypatch):
     assert "+₹1,17,622 cr" in txt and "−₹64,547 cr" in txt
     assert "<b>AAA</b> RS 95, 3.0% off high, tight" in txt
     assert "Weekly trend — above the 10-week SMA</b> (1)" in txt and "+4.2% vs 10W, 7 wk above" in txt
-    assert "High tight flags</b> (1)" in txt and "pole +140%, flag −14%, in the flag, 2.5% below pivot, vol drying" in txt
+    assert "High tight flags</b> (1)" in txt and "pole +140%, flag −14%, in the flag, 2.5% below pivot" in txt
+    assert "early trigger 98 hit 23 Nov (stop 92)" in txt
     assert send_brief.compose({"levels": []}, []) is None
 
 

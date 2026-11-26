@@ -379,5 +379,16 @@ def test_backfill_new_listing_matches_live():
     vs = maths.listing_vsince(c, cal[0])
     assert vs == ds[10]
     assert r["htf"] == maths.htf_from_series(c, h, lo, vol, vsince=vs) and r["htf"]["eb"] == 0
+    assert r["htf"]["ebd"] == cal[k] and r["htf"]["bod"] is None   # the trigger fired on the last close
     sm = maths.setup_metrics(c, h, lo, vol, vsince=vs)
     assert r["vr"] == pytest.approx(sm["vr"]) and r["vd"] == pytest.approx(sm["vd"])
+
+
+def test_htf_dates_name_the_sessions():
+    cal = days(120)
+    c0, h0, l0, v0 = _early_bars(extra=(200.0, 203.0, 220.0))   # early hit, then the pivot
+    ds = cal[-len(c0):]
+    r = maths.htf_from_series(dict(zip(ds, c0)), dict(zip(ds, h0)), dict(zip(ds, l0)), dict(zip(ds, v0)))
+    assert r["bo"] == 0 and r["bod"] == ds[-1]
+    assert r["eb"] == 2 and r["ebd"] == ds[-3]                  # the early close, two sessions earlier
+    assert r["es"] / r["et"] == pytest.approx(189.0 * 0.98 / (191.0 * 1.02))

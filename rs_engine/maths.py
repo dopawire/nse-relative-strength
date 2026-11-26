@@ -504,15 +504,25 @@ def htf_state(c, h, lo, v, R=HTF, _early=True):
     return pack(P, p, pl, gain, depth, None, early)
 
 
+def htf_dates(r, days):
+    """Add the session dates to an htf_state result: bod = the pivot breakout
+    close, ebd = the early-trigger close (days = the bars it was run on)."""
+    if r:
+        r["bod"] = days[-1 - r["bo"]] if r["bo"] is not None else None
+        r["ebd"] = days[-1 - r["eb"]] if r["eb"] is not None else None
+    return r
+
+
 def htf_from_series(closes, highs, lows, volumes, since=None, vsince=None):
     """htf_state on {date: value} series: the last HTF_SESSIONS sessions on or
     after `since`; a missing high / low falls back to the close; volume before
     `vsince` (a new listing's first sessions) is left out."""
     days = [d for d in sorted(closes) if since is None or d >= since][-HTF_SESSIONS:]
     c = [closes[d] for d in days]
-    return htf_state(c, [highs.get(d, closes[d]) for d in days],
-                     [lows.get(d, closes[d]) for d in days],
-                     [volumes.get(d) if vsince is None or d >= vsince else None for d in days])
+    return htf_dates(htf_state(c, [highs.get(d, closes[d]) for d in days],
+                               [lows.get(d, closes[d]) for d in days],
+                               [volumes.get(d) if vsince is None or d >= vsince else None
+                                for d in days]), days)
 
 
 def untraded_sessions(closes, volumes, window):

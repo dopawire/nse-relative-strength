@@ -125,11 +125,11 @@ def compose(data, watch=None, save=True):
             if not h:
                 continue
             state = ("in the flag, " + f"{-h['dist']:.1f}% below pivot" if h.get("bo") is None
-                     else f"broke out {day_txt(d['asof'])[:-5]}" if h["bo"] == 0
-                     else f"broke out {h['bo']} session(s) before {day_txt(d['asof'])[:-5]}")
+                     else f"broke out {day_txt(h['bod'])[:-5]}" if h.get("bod")
+                     else "broke out")
             dry = ", vol drying" if h.get("dry") is not None and h["dry"] < 0.7 else ""
             if h.get("bo") is None and h.get("et") is not None:
-                state += (f", early trigger {h['et']:g} hit" if h.get("eb") is not None
+                state += (f", early trigger {h['et']:g} hit {day_txt(h['ebd'])[:-5]}" if h.get("ebd")
                           else f", early trigger {h['et']:g}") + f" (stop {h['es']:g})"
             lines.append(row(s) + e(f" · pole +{h['g']:.0f}%, flag −{h['fd']:.0f}%, {state}{dry} · ASM?"))
     if reg["level"] == "off":
