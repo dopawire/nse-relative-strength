@@ -1144,6 +1144,7 @@
           <tr><td title="average return of the day's top 15 pullback candidates minus NIFTY 500">Pullbacks vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].pb)).join('')}</tr>
           <tr><td title="average return of the day's top 15 IPO bases minus NIFTY 500">IPO bases vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].ipo)).join('')}</tr>
           <tr><td title="average return of the day's top 25 weekly-trend stocks (above a rising 10-week SMA) minus NIFTY 500">Weekly trend vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].wkl)).join('')}</tr>
+          <tr><td title="average return of the day's high-tight-flag list (in the flag or just broken out) minus NIFTY 500">High tight flags vs NIFTY 500</td>${HZ.map(h => listCell(s[h] && s[h].htf)).join('')}</tr>
           <tr><td title="breakout watch vs NIFTY 500, split by the market regime on the day of the call">Breakouts by regime</td>${HZ.map(brkReg).join('')}</tr>
           <tr><td title="NIFTY 500's average return after days with each regime reading">NIFTY 500 after each regime</td>${HZ.map(reg).join('')}</tr></tbody></table></div>
       <div class="dc-note">Lists are bought at that day's close and held, without stops or costs — the raw edge of the screen, not a trading result.</div>`;
@@ -1206,7 +1207,7 @@
   }
 
   // ---- SWING: what I'd check every evening ----------------------------------
-  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge', dhi: 'High delivery', dlo: 'Weak delivery', near10: 'Near 10W' };
+  const TAG_WORD = { tight: 'Tight', dry: 'Vol dry-up', surge: 'Vol surge', dhi: 'High delivery', dlo: 'Weak delivery', near10: 'Near 10W', vdry: 'Flag vol dry-up' };
   const TAG_TIP = {
     tight: '10-day range within 2.5 average daily ranges — a quiet base (ranked higher)',
     dry: '10-day volume below 85% of the prior 50 days — sellers drying up (ranked higher)',
@@ -1214,6 +1215,7 @@
     dhi: '20-day average delivery ≥ 50% — steady buying into demat (breakouts ranked higher)',
     dlo: 'today’s delivery below 80% of its average — more intraday churn than buying (breakouts ranked lower)',
     near10: 'within 5% above its 10-week SMA — close to the weekly support line, a low-risk entry',
+    vdry: 'average volume in the flag under 70% of the pole’s — sellers gone; in the NSE test these HTFs did far better (ranked first)',
   };
   // upcoming event within 14 days: results get the loud badge (gap risk)
   function evBadge(ev) {
@@ -1236,6 +1238,8 @@
     const breakouts = pick(D.breakouts), pullbacks = pick(D.pullbacks), extended = pick(D.extended);
     const ipos = pick(D.ipos || []), IR = D.ipo_rules || {};
     const weekly = pick(D.weekly || []), WR = D.weekly_rules || {};
+    // older rs_data.json (built before the HTF list) has no rules: defaults
+    const htfs = pick(D.htf || []), HR = { minPole: 100, poleWeeks: 9, maxFlag: 25, flagWeeks: [1, 6], boDays: 5, ...(D.htf_rules || {}) };
     const inBrk = new Set(D.breakouts.slice(0, 25));
     const inIpo = new Set((D.ipos || []).slice(0, 15));
     const ind = Object.fromEntries(D.industries.map(r => [r.name, r]));
@@ -1312,6 +1316,34 @@
         <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
         <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${inIpo.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s IPO bases list — a listing under a year old">IPO base</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
       : '<div class="dc-empty">No leader is in a rising weekly trend that isn\'t already extended right now.</div>';
+    const htfState = h => h.bo == null
+      ? `<span class="tnum">${(-h.dist).toFixed(1)}% below</span><span class="dc-sub2">in the flag</span>`
+      : `<span class="tnum">${tone(h.dist)} above</span><span class="dc-sub2">${h.bo === 0 ? 'broke out today' : `broke out ${h.bo}d ago`}</span>`;
+    const htfTable = list => list.length ? `<div class="scan-table-wrap"><table class="scan-table dc-table">
+      <thead><tr><th>#</th><th>Stock</th><th>Industry</th><th>Price</th>
+        <th title="RS rating 1-99 vs all stocks">RS</th>
+        <th title="the run-up: low to the pole high, and how many sessions it took">Pole</th>
+        <th title="deepest pullback from the pole high, and sessions since the pole high">Flag</th>
+        <th title="the pole high — the breakout level (set your alert here)">Pivot</th>
+        <th title="today's close vs the pivot">vs pivot</th>
+        <th title="average volume in the flag ÷ average volume in the pole — under 0.7 = drying up">Flag vol</th>
+        <th title="average daily range, 20 days — size the stop with it">ADR</th>
+        <th title="average daily traded value, 20 sessions">₹ cr/day</th><th>Setup</th></tr></thead>
+      <tbody>${list.slice(0, 15).map((m, i) => `<tr class="dc-tr" data-sym="${utils.esc(m.s)}">
+        <td class="tnum">${i + 1}</td>
+        <td class="dc-nm">${utils.esc(m.n.replace(/\s+(Limited|Ltd\.?)$/i, ''))}<span class="msym">${utils.esc(m.s)} · ${utils.esc((CAP_LABEL[m.cap] || '').replace(' cap', ''))}${evBadge(m.ev)}</span></td>
+        <td class="dc-ind">${inLead(m) ? '<span class="dc-hot" title="in a leading industry / sector">●</span>' : ''}${utils.esc(m.industry || '')}</td>
+        <td class="tnum">${utils.fmtPrice(m.l)}</td>
+        <td class="tnum"><b>${m.rr ?? '—'}</b></td>
+        <td class="tnum">+${m.htf.g.toFixed(0)}%<span class="dc-sub2">${m.htf.pw} sessions</span></td>
+        <td class="tnum">−${m.htf.fd.toFixed(0)}%<span class="dc-sub2">${m.htf.fw} sessions</span></td>
+        <td class="tnum">${utils.fmtPrice(m.htf.p)}</td>
+        <td>${htfState(m.htf)}</td>
+        <td class="tnum">${m.htf.dry == null ? '—' : m.htf.dry.toFixed(2) + '×'}</td>
+        <td class="tnum">${m.a == null ? '—' : m.a.toFixed(1) + '%'}</td>
+        <td class="tnum">${m.tv == null ? '—' : m.tv.toFixed(0)}</td>
+        <td>${inBrk.has(m.s) ? '<span class="dc-tag t-brk" title="also in today\'s breakout watch (top 25)">Breakout watch</span>' : ''}${tagCell(m)}</td></tr>`).join('')}</tbody></table></div>`
+      : '<div class="dc-empty">No liquid stock is in a high tight flag right now — they are rare (a few a month, mostly in strong markets).</div>';
     const checks = reg.checks.map(c => `<li class="${c.ok === null ? 'na' : c.ok ? 'ok' : 'no'}">
         <span class="dc-ck">${c.ok === null ? '–' : c.ok ? '✓' : '✗'}</span>${c.t}<span class="dc-cv">${utils.esc(c.v)}</span></li>`).join('');
     const indRows = leadInd.map(r => `<div class="dc-ind-row"><b>${utils.esc(r.name)}</b>
@@ -1325,6 +1357,7 @@
       pb: { name: 'Pullbacks in leaders', file: 'pullbacks', list: pullbacks },
       ipo: { name: 'IPO bases', file: 'ipo_bases', list: ipos },
       wk: { name: 'Weekly trend above 10W SMA', file: 'weekly_10w', list: weekly },
+      htf: { name: 'High tight flags', file: 'high_tight_flags', list: htfs },
     };
     const tvList = k => TV_LISTS[k].list.map(m => tvSym(m.s)).join(',');
     const tvAll = () => Object.values(TV_LISTS).filter(t => t.list.length)
@@ -1338,12 +1371,12 @@
         <button type="button" class="dc-tvb" data-tv="${k}" data-act="dl" title="Download ${what} as a .txt — TradingView: watchlist menu → Import list">⬇ .txt</button></span>`;
     };
     const tvDay = D.asof || '';
-    let sec = 7;
+    let sec = 8;
     $.content.innerHTML = `<div class="scan-card dc">
       <div class="scan-head"><div><div class="scan-title">Swing-trading desk</div>
         <div class="scan-sub">what I would check every evening before the next session · as of ${asOfText()}</div></div>
-        ${breakouts.length + pullbacks.length + ipos.length + weekly.length ? `<button type="button" class="dc-tvb dc-tv-all" data-act="all"
-          title="One TradingView watchlist with a section per list (Breakout watch / Pullbacks / IPO bases / Weekly trend) — TradingView: watchlist menu → Import list">⬇ TradingView watchlist · all 4 lists</button>` : ''}</div>
+        ${breakouts.length + pullbacks.length + ipos.length + weekly.length + htfs.length ? `<button type="button" class="dc-tvb dc-tv-all" data-act="all"
+          title="One TradingView watchlist with a section per list (Breakout watch / Pullbacks / IPO bases / Weekly trend / High tight flags) — TradingView: watchlist menu → Import list">⬇ TradingView watchlist · all lists</button>` : ''}</div>
       <div class="dc-body">
         <div class="dc-answer"><span class="dc-dot r-${reg.level}"></span><div>
           <div class="dc-answer-t">Market: <b class="r-${reg.level}-t">${R.word}</b> — ${reg.pass} of ${reg.known} checks pass.</div>
@@ -1375,6 +1408,13 @@
             A positional swing: hold while the weekly close stays above the 10-week line, exit on a weekly close below it.
             <span class="dc-tag t-near10">Near 10W</span> = within ${WR.near}% of the line — the lower-risk entry; far above it, wait for a pullback toward the line.</div>
           ${weeklyTable(weekly)}</section>
+        <section class="dc-wide"><div class="dc-h3row"><h3>7 · High tight flags — a +${HR.minPole}% pole, then a tight flag <span class="dc-muted">${htfs.length} stocks</span></h3>${tvButtons('htf', 15)}</div>
+          <div class="dc-note">The rare, explosive pattern: up ≥ ${HR.minPole}% in ≤ ${HR.poleWeeks} weeks (the pole), then a pullback of ≤ ${HR.maxFlag}% lasting ${HR.flagWeeks[0]}–${HR.flagWeeks[1]} weeks (the flag);
+            buy the first close above the pivot (the pole high). Listed while in the flag, and for ${HR.boDays} sessions after a breakout that holds. ≥ ₹${S.minTurnoverCr} cr/day only.
+            <span class="dc-tag t-vdry">Flag vol dry-up</span> ranks first — in the NSE test (82 breakouts, 2024–26) those beat NIFTY 500 by +6.7% over 20 sessions and 27% went +50% within 3 months
+            (without dry-up +2.8%, 15%); but the median trade was flat, so use a stop (≈ 8% / under the flag low) and let the few big winners run.
+            <b>India check:</b> a stock up 100% in weeks is often put in NSE's <b>ASM</b> list (higher margin, sometimes trade-for-trade) — look it up before buying; circuit limits can gap through a stop.</div>
+          ${htfTable(htfs)}</section>
         ${extended.length ? `<section class="dc-wide"><h3>${sec++} · Don't chase — extended leaders</h3>
           <div class="dc-note">Up > 20% in a week or > ${S.maxMonth}% in a month: wait for a base or a pullback.</div>
           <div class="dc-chips">${ext}</div></section>` : ''}

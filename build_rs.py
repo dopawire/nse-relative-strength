@@ -55,6 +55,7 @@ from rs_engine.maths import (percentrank_inc, ema_flags, rs_ema_flag,
                              last_break_date, pct_off_high, adr_pct,
                              equal_weight_rs, period_return, avg_turnover_cr, index_trend,
                              setup_metrics, is_illiquid, ipo_metrics, weekly_closes, weekly_trend,
+                             htf_from_series,
                              rs_ratings)
 from rs_engine.breadth import (compute_breadth, compute_macro_breadth,
                                detect_breadth_divergence)
@@ -945,6 +946,8 @@ def save_rs_json(levels, breadth, meta, path, rotation=None, flows=None, post=No
                     members_out[-1]["ipo"] = m["ipo"]
                 if m.get("wk"):               # weekly 10-SMA trend {s, d, u, n}
                     members_out[-1]["wk"] = m["wk"]
+                if m.get("htf"):              # High Tight Flag setup (maths.htf_state)
+                    members_out[-1]["htf"] = m["htf"]
             level_data["groups"].append({
                 "id": gid, "name": it["name"],
                 "n": it["n"], "pct": round(it["pct"], 4),
@@ -1172,6 +1175,8 @@ def main():
                       "ipo": ipo_metrics(ser, ipo_list.get(sym), cal, bench,
                                          raw_first=nse_archive.raw_close(arc, sym, min(ser))),
                       "wk": weekly_trend(weekly_closes(ser, since=brk)),
+                      "htf": htf_from_series(ser, highs.get(sym, {}), lows.get(sym, {}),
+                                             volumes.get(sym, {}), since=brk),
                       **setup_metrics(ser, highs.get(sym, {}), lows.get(sym, {}),
                                       volumes.get(sym, {}), since=brk),
                       **nse_archive.delivery_metrics(arc.get(sym), ref_dates[-1])}

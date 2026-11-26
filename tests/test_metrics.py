@@ -259,3 +259,62 @@ def test_ipo_metrics_adjusts_issue_price_for_a_split():
     assert m["g"] == pytest.approx((84.56 / 80.8 - 1) * 100, abs=0.05)      # +4.7%, not −89.5%
     no_ca = maths.ipo_metrics(c, {"listed": cal[-30], "price": 808.0}, cal, raw_first=66.81)
     assert no_ca["p"] == 808.0
+
+
+def _htf_bars(pole=110.0, flag_depth=12.0, flag_len=10, flag_vol=40_000, extra=()):
+    """40 flat bars at 100, a pole to 100·(1+pole%) over 30 bars, then a flag."""
+    c, v = [100.0] * 40, [100_000] * 40
+    top = 100 * (1 + pole / 100)
+    for k in range(1, 31):
+        c.append(100 + (top - 100) * k / 30)
+        v.append(150_000)
+    for k in range(flag_len):
+        c.append(top * (1 - flag_depth / 100 * (0.5 + 0.5 * (k % 2))))
+        v.append(flag_vol)
+    c += list(extra)
+    v += [200_000] * len(extra)
+    h = [x * 1.0 for x in c]
+    lo = [x * 1.0 for x in c]
+    return c, h, lo, v
+
+
+def test_htf_in_flag_then_breakout():
+    c, h, lo, v = _htf_bars()
+    r = maths.htf_state(c, h, lo, v)
+    top = 210.0
+    assert r["bo"] is None and r["p"] == top and r["g"] == pytest.approx(110.0)
+    assert r["fd"] == pytest.approx(12.0) and r["fw"] == 10 and r["pw"] == 30
+    assert r["dist"] == pytest.approx((c[-1] / top - 1) * 100, abs=0.01) and r["dist"] < 0
+    assert r["dry"] == pytest.approx(40_000 / 150_000, abs=0.01)
+    b = maths.htf_state(*_htf_bars(extra=(215.0,)))       # first close above the pivot
+    assert b["bo"] == 0 and b["p"] == top and b["dist"] == pytest.approx((215 / top - 1) * 100, abs=0.01)
+    b3 = maths.htf_state(*_htf_bars(extra=(215.0, 214.0, 216.0)))
+    assert b3["bo"] == 2                                   # still listed 2 sessions later
+    assert maths.htf_state(*_htf_bars(extra=(215.0, 190.0))) is None   # failed back under
+    assert maths.htf_state(*_htf_bars(extra=(250.0,))) is None         # > 15% above: extended
+
+
+def test_htf_rejects_weak_poles_deep_flags_and_splits():
+    assert maths.htf_state(*_htf_bars(pole=80)) is None    # pole under +100%
+    assert maths.htf_state(*_htf_bars(flag_depth=30)) is None
+    assert maths.htf_state(*_htf_bars(flag_len=2)) is None # no flag yet
+    assert maths.htf_state(*_htf_bars(flag_len=35)) is None
+    c, h, lo, v = _htf_bars()
+    for k in range(50, 60):                                # a 2:1 split inside the pole
+        c[k], h[k], lo[k] = c[k] * 2, h[k] * 2, lo[k] * 2
+    assert maths.htf_state(c, h, lo, v) is None
+
+
+def test_backfill_htf_matches_live():
+    import backfill_picks as bp
+    c0, h0, l0, v0 = _htf_bars(extra=(215.0, 214.0))
+    ds = days(320)[-len(c0):]
+    c = dict(zip(ds, c0))
+    h, lo, vol = dict(zip(ds, h0)), dict(zip(ds, l0)), dict(zip(ds, v0))
+    bench = {d: 1000.0 for d in ds}
+    st = bp.Stock({"sym": "X", "name": "X", "sector": "S", "industry": "I"}, c, h, lo, vol, bench)
+    for k in (len(ds) - 1, len(ds) - 3):
+        cut = {d: x for d, x in c.items() if d <= ds[k]}
+        r = st.record(ds[k], ds[k - 25], "Large")
+        assert r["htf"] == maths.htf_from_series(cut, h, lo, vol)
+    assert r["htf"]["bo"] is None and st.record(ds[-1], ds[-26], "Large")["htf"]["bo"] == 1

@@ -4,7 +4,7 @@ Every build appends the day's picks to nse_picks.jsonl (one line per
 session; backfilled days carry "bt": true).  evaluate() then measures each
 call 5 / 10 / 20 sessions later from the adjusted price cache:
 
-  breakouts / pullbacks / IPO bases / weekly trend
+  breakouts / pullbacks / IPO bases / weekly trend / high tight flags
                           average return of the listed stocks vs NIFTY 500,
                           and the share of them that beat NIFTY 500
   focus sectors           their stocks' average return vs the average stock
@@ -21,7 +21,7 @@ from rs_engine.config import CORP_ACTION_JUMP
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PICKS = os.path.join(ROOT, "nse_picks.jsonl")
 HORIZONS = (5, 10, 20)
-N_BREAKOUTS, N_PULLBACKS, N_IPOS, N_WEEKLY = 25, 15, 15, 25
+N_BREAKOUTS, N_PULLBACKS, N_IPOS, N_WEEKLY, N_HTF = 25, 15, 15, 25, 15
 
 
 def pick_record(dec, backtest=False):
@@ -30,7 +30,7 @@ def pick_record(dec, backtest=False):
            "focus": dec["focus"], "avoid": dec["avoid"], "turning": dec["turning"],
            "cap": dec["cap"], "breakouts": dec["breakouts"][:N_BREAKOUTS],
            "pullbacks": dec["pullbacks"][:N_PULLBACKS], "ipos": dec.get("ipos", [])[:N_IPOS],
-           "weekly": dec.get("weekly", [])[:N_WEEKLY]}
+           "weekly": dec.get("weekly", [])[:N_WEEKLY], "htf": dec.get("htf", [])[:N_HTF]}
     if backtest:
         rec["bt"] = True
     return rec
@@ -154,6 +154,7 @@ def evaluate(picks, cache, universe, horizons=HORIZONS):
                 "pb": stock_list(p.get("pullbacks", [])),
                 "ipo": stock_list(p.get("ipos", [])),
                 "wkl": stock_list(p.get("weekly", [])),
+                "htf": stock_list(p.get("htf", [])),
             }
         rows.append(row)
     return {"rows": rows, "summary": summarise(rows, horizons)}
@@ -193,7 +194,7 @@ def summarise(rows, horizons=HORIZONS):
                                 "hit": mean(x["hit"] for x in b)}
         out[h] = {"days": len(hs), "focus": edge("focus"), "avoid": edge("avoid"),
                   "cap": edge("cap"), "brk": lists("brk"), "pb": lists("pb"), "ipo": lists("ipo"),
-                  "wkl": lists("wkl"), "regime": reg, "brk_regime": brk_reg}
+                  "wkl": lists("wkl"), "htf": lists("htf"), "regime": reg, "brk_regime": brk_reg}
     return out
 
 

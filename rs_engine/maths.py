@@ -338,6 +338,113 @@ def weekly_trend(wcl, period=WEEKLY_SMA):
             "u": 1 if sma[-1] > sma[-2] else 0, "n": n}
 
 
+HTF = {"minPole": 100.0, "poleSessions": 45, "maxFlag": 25.0, "flagMin": 4, "flagMax": 30,
+       "boDays": 5, "boHold": 5.0, "boMax": 15.0, "dry": 0.7}
+HTF_SESSIONS = 82        # bars htf_state needs: breakout look-back + flag + pole
+
+
+def _last_index(xs, x, i0, i1):
+    """Last index of x in xs[i0:i1 + 1] — the pole starts where the run leaves
+    its low, not at the first touch of a flat base."""
+    for j in range(i1, i0 - 1, -1):
+        if xs[j] == x:
+            return j
+    return i0
+
+
+def _htf_at(c, h, lo, b, R):
+    """The flag behind bar b: (pivot, pivot index, pole low index, gain %, depth %)
+    with the pivot = the highest high of the 31 bars before b, or None."""
+    w0 = b - 31
+    if w0 < 0:
+        return None
+    seg = h[w0:b]
+    P = max(seg)
+    p = w0 + seg.index(P)
+    ps = max(0, p - R["poleSessions"])
+    pl_v = min(lo[ps:p + 1])
+    pl = _last_index(lo, pl_v, ps, p)
+    if pl >= p or pl_v <= 0:
+        return None
+    gain = (P / pl_v - 1) * 100
+    depth = (1 - min(lo[p:b + 1] if b > p else [P]) / P) * 100
+    return P, p, pl, gain, depth
+
+
+def htf_state(c, h, lo, v, R=HTF):
+    """High Tight Flag from aligned daily bars (oldest first, last = today):
+    a pole of ≥ +100% in ≤ 9 weeks (45 sessions) to the pivot high, then a
+    flag ≤ 25% deep for 1–6 weeks.  Either still in the flag (today's close
+    at or under the pivot) or broken out — first close above the pivot —
+    within the last 5 sessions and holding (≥ 95% of the pivot, ≤ 15% above).
+
+      p    pivot = pole high (the breakout level)
+      g    pole gain %          pw  pole length, sessions
+      fd   flag depth %         fw  flag length, sessions (pivot → today)
+      dist today's close vs the pivot, % (negative = still below it)
+      dry  flag ÷ pole average volume (< 0.7 = drying up)
+      bo   sessions since the breakout, None while still in the flag
+
+    None if no setup, or a corporate-action jump lies inside it."""
+    n = len(c)
+    if n < 60:
+        return None
+    t = n - 1
+
+    def pack(P, p, pl, gain, depth, bo):
+        if any(c[j - 1] > 0 and abs(c[j] / c[j - 1] - 1) > CORP_ACTION_JUMP for j in range(pl + 1, n)):
+            return None
+        pv = [x for x in v[pl:p + 1] if x is not None]
+        fv = [x for x in v[p + 1:t + 1] if x is not None]
+        dry = (sum(fv) / len(fv)) / (sum(pv) / len(pv)) if pv and fv and sum(pv) > 0 else None
+        return {"p": round(P, 2), "g": round(gain, 1), "pw": p - pl, "fd": round(depth, 1),
+                "fw": t - p, "dist": round((c[t] / P - 1) * 100, 2),
+                "dry": None if dry is None else round(dry, 2), "bo": bo}
+
+    # broke out within the last boDays sessions (the first close above the pivot)
+    for k in range(R["boDays"]):
+        b = t - k
+        f = _htf_at(c, h, lo, b, R)
+        if not f or c[b] <= f[0]:
+            continue
+        P, p, pl, gain, depth = f
+        if not (R["flagMin"] + 1 <= b - p <= R["flagMax"]) or gain < R["minPole"] \
+                or (1 - min(lo[p:b]) / P) * 100 > R["maxFlag"]:
+            continue
+        if any(c[j] > P for j in range(p + 1, b)):
+            continue                                   # not the first close above it
+        if not (P * (1 - R["boHold"] / 100) <= c[t] <= P * (1 + R["boMax"] / 100)):
+            return None                                # failed, or already extended
+        return pack(P, p, pl, gain, (1 - min(lo[p:b]) / P) * 100, k)
+    # still in the flag
+    seg = h[t - 30:t + 1]
+    P = max(seg)
+    p = t - 30 + seg.index(P)
+    if not (R["flagMin"] <= t - p <= R["flagMax"] - 1) or c[t] > P:
+        return None
+    # (the same window the breakout test uses for tomorrow: it breaks out on
+    # the first close above P)
+    ps = max(0, p - R["poleSessions"])
+    pl_v = min(lo[ps:p + 1])
+    pl = _last_index(lo, pl_v, ps, p)
+    if pl >= p or pl_v <= 0:
+        return None
+    gain = (P / pl_v - 1) * 100
+    depth = (1 - min(lo[p:t + 1]) / P) * 100
+    if gain < R["minPole"] or depth > R["maxFlag"]:
+        return None
+    return pack(P, p, pl, gain, depth, None)
+
+
+def htf_from_series(closes, highs, lows, volumes, since=None):
+    """htf_state on {date: value} series: the last HTF_SESSIONS sessions on or
+    after `since`; a missing high / low falls back to the close."""
+    days = [d for d in sorted(closes) if since is None or d >= since][-HTF_SESSIONS:]
+    c = [closes[d] for d in days]
+    return htf_state(c, [highs.get(d, closes[d]) for d in days],
+                     [lows.get(d, closes[d]) for d in days], [volumes.get(d) for d in days])
+
+
 def untraded_sessions(closes, volumes, window):
     """Sessions of `window` (market sessions) on or after the stock's first
     bar on which it didn't trade (no volume)."""

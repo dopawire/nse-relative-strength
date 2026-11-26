@@ -25,7 +25,8 @@ from bisect import bisect_left, bisect_right
 import build_rs as B
 from rs_engine import decide, flows, nse_archive, track
 from rs_engine.config import ADR_PERIOD, CORP_ACTION_JUMP, EMA_PERIODS, ILLIQUID_TURNOVER_CR, WINDOW
-from rs_engine.maths import WEEKLY_SESSIONS, index_trend, ipo_metrics, week_key, weekly_trend
+from rs_engine.maths import (HTF_SESSIONS, WEEKLY_SESSIONS, htf_state, index_trend, ipo_metrics,
+                             week_key, weekly_trend)
 
 
 def _emas(vals, period):
@@ -57,6 +58,10 @@ class Stock:
         # weekly bars: index of each week's last session (maths.weekly_closes)
         wk = [week_key(d) for d in self.ds]
         self.wend = [i for i in range(len(wk)) if i == len(wk) - 1 or wk[i] != wk[i + 1]]
+        # aligned bars for maths.htf_from_series (missing high / low → close)
+        self.h_arr = [hi.get(d, x) for d, x in zip(self.ds, self.c)]
+        self.l_arr = [lo.get(d, x) for d, x in zip(self.ds, self.c)]
+        self.v_arr = [vol.get(d) for d in self.ds]
         common = [i for i, d in enumerate(self.ds) if d in bench]
         self.rs_i = common
         ratios = [self.c[i] / bench[self.ds[i]] for i in common]
@@ -146,6 +151,9 @@ class Stock:
         start = max(i - WEEKLY_SESSIONS + 1, bisect_left(self.ds, since), 0)
         wcl = [self.c[j] for j in self.wend[bisect_left(self.wend, start):bisect_left(self.wend, i)]]
         wk = weekly_trend(wcl + [self.c[i]])
+        hs0 = max(i - HTF_SESSIONS + 1, bisect_left(self.ds, since), 0)
+        htf = htf_state(self.c[hs0:i + 1], self.h_arr[hs0:i + 1], self.l_arr[hs0:i + 1],
+                        self.v_arr[hs0:i + 1])
         nw = None
         if self.ds[0] > window_start:
             nw = len([d for d in self.ds[:i + 1] if d >= window_start])
@@ -163,7 +171,7 @@ class Stock:
                 "industry": self.u["industry"], "cap": cap,
                 "e": e, "b": rse, "h": h, "a": a, "l": price, "nw": nw,
                 "m1": self.ret(i, sess(20)), "m3": self.ret(i, sess(63)), "w1": self.ret(i, sess(5)),
-                "tv": tv, "vr": vr, "vd": vd, "tt": tt, "ipo": ipo, "wk": wk, "_i": i}
+                "tv": tv, "vr": vr, "vd": vd, "tt": tt, "ipo": ipo, "wk": wk, "htf": htf, "_i": i}
 
     def rr_score(self, i):
         if i <= 63:

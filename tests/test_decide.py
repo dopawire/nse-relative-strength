@@ -215,3 +215,25 @@ def test_weekly_trend_list():
     assert d["weekly_rules"]["sma"] == 10 and d["weekly_rules"]["minRS"] == 90
     rec = track.pick_record({**d, "asof": "2026-11-26"})
     assert rec["weekly"] == ["WKA", "WKB"]
+
+
+def htf_stock(s, dist=-3.0, dry=0.5, bo=None, **kw):
+    m = stock(s, "Alpha", **kw)
+    m["htf"] = {"p": 500.0, "g": 120.0, "pw": 30, "fd": 15.0, "fw": 12, "dist": dist, "dry": dry, "bo": bo}
+    return m
+
+
+def test_htf_list():
+    st = universe() + [
+        htf_stock("HFAR", dist=-8),                    # dry, 8% under the pivot
+        htf_stock("HNEAR", dist=-1),                   # dry, 1% under: before HFAR
+        htf_stock("HBO", dist=4, bo=1),                # broke out yesterday, dry: leads
+        htf_stock("HWET", dist=-0.5, dry=1.1),         # volume not drying: after the dry ones
+        htf_stock("HTHIN", tv=1),                      # illiquid
+        htf_stock("HNEW", nw=5),                       # new listing in the RS window
+    ]
+    d = decide.analyse(st)
+    assert d["htf"] == ["HBO", "HNEAR", "HFAR", "HWET"]
+    assert "vdry" in d["tags"]["HNEAR"] and "vdry" not in d["tags"].get("HWET", [])
+    assert d["htf_rules"]["minPole"] == 100
+    assert track.pick_record({**d, "asof": "2026-11-26"})["htf"] == d["htf"]

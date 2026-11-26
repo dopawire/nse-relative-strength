@@ -118,6 +118,16 @@ def compose(data, watch=None, save=True):
             w = ms.get(s, {}).get("wk") or {}
             extra = f" · {pct(w['d'])} vs 10W, {w['n']} wk above" if w.get("d") is not None else ""
             lines.append(row(s) + e(extra))
+    if d.get("htf"):
+        lines += ["", f"<b>High tight flags</b> ({len(d['htf'])}) — top 3:"]
+        for s in d["htf"][:3]:
+            h = ms.get(s, {}).get("htf") or {}
+            if not h:
+                continue
+            state = ("in the flag, " + f"{-h['dist']:.1f}% below pivot" if h.get("bo") is None
+                     else f"broke out {'today' if h['bo'] == 0 else str(h['bo']) + 'd ago'}")
+            dry = ", vol drying" if h.get("dry") is not None and h["dry"] < 0.7 else ""
+            lines.append(row(s) + e(f" · pole +{h['g']:.0f}%, flag −{h['fd']:.0f}%, {state}{dry} · ASM?"))
     if reg["level"] == "off":
         lines.append("<i>Risk-off: breakouts have only matched NIFTY on such days — be very selective.</i>")
 
@@ -129,6 +139,7 @@ def compose(data, watch=None, save=True):
     if s20.get("brk") and s20.get("focus"):
         ipo = f"IPO bases {pct(s20['ipo']['ex'] * 100)}, " if s20.get("ipo") else ""
         ipo += f"weekly trend {pct(s20['wkl']['ex'] * 100)}, " if s20.get("wkl") else ""
+        ipo += f"HTF {pct(s20['htf']['ex'] * 100)}, " if s20.get("htf") else ""
         lines += ["", f"📈 <i>Track record (20 sessions): breakouts {pct(s20['brk']['ex'] * 100)} vs NIFTY 500, "
                       f"{ipo}focus sectors {pct(s20['focus']['avg'] * 100)} vs the average stock "
                       f"({s20['focus']['hit'] * 100:.0f}% of days).</i>"]

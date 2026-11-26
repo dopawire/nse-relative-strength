@@ -98,17 +98,33 @@ with:
   vs NIFTY 500 over 20 sessions (median +1.7%, 54% beat it) — RS-80 stocks
   below their 10-week line did +1.2%, the average liquid stock +0.6%.  Only
   a third of the list overlaps the breakout watch.
+  **High tight flags** (`maths.htf_state`) — the rare pattern from the
+  O'Neil / IBD model book: a pole of ≥ +100% in ≤ 9 weeks (low → pivot high),
+  then a flag ≤ 25% deep for 1–6 weeks; the buy point is the first close
+  above the pivot.  Listed while in the flag, and for 5 sessions after a
+  breakout that holds (≥ 95% of the pivot, ≤ 15% above it); liquid stocks
+  only (≥ ₹5 cr/day, ≥ ₹50).  Each row shows the pole, flag depth and
+  length, the pivot, today's distance to it and flag ÷ pole volume; *Flag vol
+  dry-up* (< 0.7×) ranks first.  NSE test of the function itself (82 liquid
+  breakouts, Nov 2024 – Nov 2026): +4.7% vs NIFTY 500 over 20 sessions;
+  with dry-up +6.7%, 38% reached +20% before −8% and 27% went +50% within 3
+  months (without: +2.8%, 29%, 15%; ordinary flag breakouts 24%, 6%).  The
+  median trade is flat — the edge is a fat tail, so stops matter; 2025 H1's
+  small-cap correction saw almost none work.  India specifics in the page
+  note: such runs often land in NSE's ASM list, and circuit limits can gap
+  through a stop.  Illiquid / SME HTFs looked better on paper but are left
+  out (operator-driven, untradeable at those prices).
   **TradingView export:** each list has *Copy N for TradingView* (every
   stock that passes, in rank order, as `NSE:SYMBOL,…` — paste it into a
   watchlist's add-symbol box) and *⬇ .txt*; the header button saves all
-  four as one watchlist file with a `###` section per list (TradingView:
+  lists as one watchlist file with a `###` section per list (TradingView:
   watchlist menu → *Import list*).  Symbols use TradingView's form — `&`
   and `-` become `_` (M&M → `NSE:M_M`, BAJAJ-AUTO → `NSE:BAJAJ_AUTO`), as
   does the level pages' *Copy for TradingView*.
 - **Track record** (on both pages) — every build logs the day's calls to
   `nse_picks.jsonl` and scores them 5 / 10 / 20 sessions later: focus /
   avoid sectors and the size pick vs the average stock, the breakout and
-  pullback / IPO-base / weekly-trend lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
+  pullback / IPO-base / weekly-trend / HTF lists vs NIFTY 500 (also split by regime), and NIFTY 500 after
   each regime.  `backfill_picks.py` rebuilt the year before live logging from
   price history with the same rules (marked as such).  The rules live in
   `rs_engine/decide.py`, so the pages, the log and the brief always agree.

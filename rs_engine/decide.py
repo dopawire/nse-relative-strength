@@ -33,7 +33,14 @@ IPO = {"minAge": 10, "maxAge": 250, "maxOffHigh": 10, "minAdr": 2, "maxAdr": 10,
 # (230 sessions, top 25): +3.1% vs NIFTY 500 over 20 sessions, median +1.7%,
 # 54% beat it — vs +1.2% for RS-80 stocks below their 10-week line.
 WEEKLY = {"sma": 10, "minRS": 90, "minAdr": 2, "maxAdr": 8, "maxWeek": 15, "maxMonth": 50, "near": 5}
-N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS, N_WEEKLY = 25, 15, 12, 15, 25
+# High Tight Flags (maths.htf_state finds them): liquid stocks only.  NSE
+# test of htf_state itself (82 liquid breakouts, Nov 2024 – Nov 2026): +4.7%
+# vs NIFTY 500 over 20 sessions; with volume drying up in the flag +6.7%, 38%
+# reached +20% before −8% and 27% went +50% within 3 months (without: +2.8%,
+# 29%, 15%; ordinary breakouts: 24%, 6%).  Fat tail, median ≈ flat — stops.
+HTF_RULES = {"minPole": 100, "poleWeeks": 9, "maxFlag": 25, "flagWeeks": [1, 6], "dry": 0.7,
+             "boDays": 5}
+N_BREAKOUTS, N_PULLBACKS, N_EXTENDED, N_IPOS, N_WEEKLY, N_HTF = 25, 15, 12, 15, 25, 15
 
 
 def median(xs):
@@ -206,6 +213,12 @@ def weekly_trend(m):
         and (m.get("m1") is None or m["m1"] <= R["maxMonth"])
 
 
+def htf_dry(m):
+    """Volume in the flag under 70% of the pole's — the HTF's best tell."""
+    d = (m.get("htf") or {}).get("dry")
+    return d is not None and d < HTF_RULES["dry"]
+
+
 def near_10w(m):
     """Within WEEKLY["near"]% above the 10-week SMA — the low-risk entry."""
     d = (m.get("wk") or {}).get("d")
@@ -306,6 +319,9 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
     ipo.sort(key=lambda m: (-(10 * in_lead(m) - 1.5 * m["h"] + setup_bonus(m)
                               + 0.2 * min(m["ipo"]["x"], 100)), m["s"]))
     wkl = sorted((m for m in live if weekly_trend(m)), key=lambda m: (-m["rr"], m["s"]))
+    # HTF: drying volume first, then nearest the pivot (fresh breakouts lead)
+    htf = sorted((m for m in stocks if m.get("htf") and _liquid(m) and not m.get("nw")),
+                 key=lambda m: (not htf_dry(m), -m["htf"]["dist"], m["s"]))
     ext = [m for m in live if (m.get("rr") or 0) >= S["minRS"] and _liquid(m)
            and ((m.get("w1") or 0) > 20 or (m.get("m1") or 0) > S["maxMonth"])]
     ext.sort(key=lambda m: -(m.get("w1") or 0))
@@ -327,12 +343,15 @@ def analyse(stocks, market=None, osc=None, fii_month=None, group_pct=None):
         "extended": [m["s"] for m in ext][:N_EXTENDED],
         "ipos": [m["s"] for m in ipo],
         "weekly": [m["s"] for m in wkl],
+        "htf": [m["s"] for m in htf],
         "rules": {k: list(v) if isinstance(v, tuple) else v for k, v in SWING.items()},
         "ipo_rules": dict(IPO),
         "weekly_rules": dict(WEEKLY),
+        "htf_rules": dict(HTF_RULES),
         "tags": {m["s"]: [t for t, f in (("tight", tight), ("dry", drying), ("surge", surge),
-                                         ("dhi", deliv_high), ("dlo", deliv_weak), ("near10", near_10w)) if f(m)]
-                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS] + ipo[:N_IPOS] + wkl[:N_WEEKLY]},
+                                         ("dhi", deliv_high), ("dlo", deliv_weak), ("near10", near_10w), ("vdry", htf_dry)) if f(m)]
+                 for m in brk[:N_BREAKOUTS] + pb[:N_PULLBACKS] + ipo[:N_IPOS] + wkl[:N_WEEKLY]
+                 + htf[:N_HTF]},
     }
 
 

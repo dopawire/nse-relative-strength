@@ -321,6 +321,9 @@ def test_focus_and_swing_pages(server, browser):
     heads = [h.inner_text() for h in page.query_selector_all(".dc-wide h3")]
     assert any(h.upper().startswith("5 · IPO BASES") for h in heads), heads
     assert any(h.upper().startswith("6 · WEEKLY TREND") for h in heads), heads
+    assert any(h.upper().startswith("7 · HIGH TIGHT FLAGS") for h in heads), heads
+    assert any("HIGH TIGHT FLAGS" in t.upper() for t in
+               [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")])
     assert any("WEEKLY TREND" in t.upper() for t in
                [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")])
     track_rows = [r.inner_text() for r in page.query_selector_all(".dc-track td:first-child")]
