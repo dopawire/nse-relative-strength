@@ -130,6 +130,8 @@ def test_users_cli(tmp_path, monkeypatch, capsys):
     assert auth.load_users() == {}
 
 
-def test_head_on_the_app_shell(api):
-    assert api.head("/").status_code == 200          # uptime monitors use HEAD
+def test_head_for_uptime_monitors(api):
+    from pathlib import Path
     assert api.head("/api/health").status_code == 200
+    if (Path(__file__).resolve().parent.parent / "frontend" / "dist" / "index.html").exists():
+        assert api.head("/").status_code == 200      # the app shell (only once it's built)
