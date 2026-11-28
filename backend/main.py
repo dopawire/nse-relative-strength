@@ -217,6 +217,7 @@ def get_meta():
         "illiquid": m.get("illiquid", []),
         "src": m.get("src", {}),
         "ipo": m.get("ipo", []),
+        "window_dates": m.get("window_dates", []),
     }
 
 

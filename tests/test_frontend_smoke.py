@@ -123,7 +123,7 @@ def test_overview(server, browser):
     ctx.close()
 
 
-def test_rankings_filters_expand_select(server, browser):
+def test_rankings_master_detail(server, browser):
     ctx, page = new_page(browser, server)
     page.goto(server + "/rankings/sector", wait_until="networkidle")
     page.wait_for_selector("[data-testid=level-table] tr.grp-row")
@@ -131,9 +131,20 @@ def test_rankings_filters_expand_select(server, browser):
     assert n_groups > 5
     tabs = [b.inner_text() for b in page.query_selector_all("[data-testid=level-tabs] button")]
     assert len(tabs) == 4 and tabs[0].startswith("Macro")
-    page.locator("tr.grp-row").first.click()                         # expand
-    page.wait_for_selector("table.sub-tbl tbody tr")
-    assert len(page.query_selector_all("table.sub-tbl th.c")) == 6   # RS21 + 5 EMAs
+    # the top group is selected and its stocks are shown on the right
+    assert page.locator("tr.grp-row.sel").count() == 1
+    page.wait_for_selector("[data-testid^=members-] tbody tr")
+    first = page.locator("tr.grp-row").nth(1)
+    first.click()
+    gid = first.get_attribute("data-gid")
+    page.wait_for_selector(f"[data-testid=members-{gid}] tbody tr")
+    assert page.locator("tr.grp-row.sel").get_attribute("data-gid") == gid
+    assert len(page.query_selector_all(f"[data-testid=members-{gid}] tbody tr:first-child .emas i")) == 5
+    assert page.locator(".dh-chart svg").count() == 1                 # group RS line over the window
+    page.keyboard.press("Escape")
+    page.focus("[data-testid=level-table]")
+    page.keyboard.press("ArrowDown")                                  # keyboard moves the selection
+    assert page.locator("tr.grp-row.sel").get_attribute("data-gid") != gid
     for b in page.query_selector_all("[data-testid=ema-filters] button"):
         b.click()                                                    # above all 5 EMAs
     page.wait_for_timeout(200)
@@ -144,11 +155,11 @@ def test_rankings_filters_expand_select(server, browser):
     assert "No stocks match" in page.inner_text("main")
     page.fill("[data-testid=rank-search]", "")
     page.click("text=Select visible")
-    sel = int(page.inner_text("[data-testid=sel-count]").split()[0])
+    sel = int(page.inner_text("[data-testid=sel-count] b"))
     assert sel > 0
     page.goto(server + "/rankings/macro", wait_until="networkidle")
     page.wait_for_selector("tr.grp-row")
-    deltas = page.query_selector_all("[data-testid=level-table] tr.grp-row .delta")
+    deltas = page.query_selector_all("[data-testid=level-table] tr.grp-row .chg")
     assert deltas, "Δ column empty"
     assert page.errors == [], page.errors
     ctx.close()

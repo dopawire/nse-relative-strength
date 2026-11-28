@@ -93,14 +93,13 @@ export function PageHeader({ title, sub, actions }: { title: ReactNode; sub?: Re
   );
 }
 
-/** KPI card: icon chip, label, big value, footnote, optional chart */
-export function Kpi({ icon, tone = 'accent', label, value, valueTone, sub, chart, testid }: {
-  icon: ReactNode; tone?: 'accent' | 'pos' | 'neg' | 'warn' | 'info' | 'violet'; label: string; value: ReactNode;
-  valueTone?: 'pos' | 'neg' | 'r-on' | 'r-mixed' | 'r-off'; sub?: ReactNode; chart?: ReactNode; testid?: string;
+/** KPI: label, value, footnote, optional chart */
+export function Kpi({ label, value, valueTone, sub, chart, testid }: {
+  label: string; value: ReactNode; valueTone?: 'pos' | 'neg' | 'r-on' | 'r-mixed' | 'r-off'; sub?: ReactNode; chart?: ReactNode; testid?: string;
 }) {
   return (
     <div className="card kpi" data-testid={testid}>
-      <div className="stat-l kpi-top"><span className={`kpi-ic ${tone}`}>{icon}</span>{label}</div>
+      <div className="stat-l">{label}</div>
       <div className={`stat-v ${valueTone ?? ''}`}>{value}</div>
       {sub && <div className="stat-s">{sub}</div>}
       {chart && <div className="kpi-spark">{chart}</div>}
@@ -115,19 +114,12 @@ export function RsBadge({ v }: { v: number | null | undefined }) {
   return <span className={`rr ${cls}`} title="RS rating 1-99 vs all stocks">{v}</span>;
 }
 
-/** a stable colour per symbol (for the little avatar squares) */
-export function symColor(s: string) {
-  let h = 0;
-  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return `linear-gradient(135deg, hsl(${h} 62% 52%), hsl(${(h + 40) % 360} 58% 40%))`;
-}
-
-/** avatar + name + symbol line */
+/** ticker first, company name underneath (how trading tools list stocks) */
 export function StockCell({ name, sym, extra }: { name: string; sym: string; extra?: ReactNode }) {
   return (
     <div className="stk">
-      <span className="stk-av" style={{ background: symColor(sym) }} aria-hidden="true">{sym.replace(/[^A-Z0-9]/gi, '').slice(0, 2)}</span>
-      <div style={{ minWidth: 0 }}><span className="stk-name">{name}</span><span className="stk-sym">{sym}{extra}</span></div>
+      <span className="ticker">{sym}</span>
+      <span className="stk-sym">{name}{extra}</span>
     </div>
   );
 }

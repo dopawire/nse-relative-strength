@@ -133,7 +133,6 @@ export function Swing() {
       actions={anyList && <button className="btn" data-act="all" title="One TradingView watchlist with a section per list — TradingView: watchlist menu → Import list"
         onClick={() => saveText(tvSections(sections), `swing_watchlist_${D.asof}.txt`)}><IconDownload />TradingView watchlist · all lists</button>} />
     <section className="card hero" data-testid="swing-answer">
-      <div className={`hero-bar ${reg.level}`} />
       <div className="hero-in">
         <Gauge pass={reg.pass} total={reg.known} level={reg.level} />
         <div>

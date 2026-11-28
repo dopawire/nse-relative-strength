@@ -7,7 +7,6 @@ import { stockIndex, type Stock } from '../lib/market';
 import { QUAD_TIP, REGIME } from '../lib/decide';
 import { useApp } from '../components/AppContext';
 import { AreaSpark, Gauge, MiniBars, Oscillator } from '../components/charts';
-import { IconFlow, IconLayers, IconPulse, IconTarget } from '../components/Icons';
 import { Card, ErrorBox, Kpi, Loading, PageHeader, RsBadge, StockCell, Tabs, Tone } from '../components/ui';
 
 type SetupKey = 'breakouts' | 'pullbacks' | 'htf' | 'weekly' | 'ipos';
@@ -20,10 +19,8 @@ const SETUPS: { key: SetupKey; label: string; anchor: string }[] = [
 /** sector tile colour from its 1-month return vs the average stock */
 function heatStyle(rel: number | null): React.CSSProperties {
   const v = Math.max(-1, Math.min(1, (rel ?? 0) / 8));
-  const a = 0.12 + Math.abs(v) * 0.6;
-  return v >= 0
-    ? { background: `linear-gradient(160deg, rgba(46,212,122,${a}), rgba(46,212,122,${a * 0.55}))`, borderColor: `rgba(46,212,122,${a * 0.6})` }
-    : { background: `linear-gradient(160deg, rgba(255,93,108,${a}), rgba(255,93,108,${a * 0.55}))`, borderColor: `rgba(255,93,108,${a * 0.6})` };
+  const a = Math.round(8 + Math.abs(v) * 42);            // % of the data colour mixed into the surface
+  return { background: `color-mix(in srgb, ${v >= 0 ? 'var(--pos)' : 'var(--neg)'} ${a}%, var(--surface-2))` };
 }
 
 function SetupList({ syms, byS, keyName }: { syms: string[]; byS: Map<string, Stock>; keyName: SetupKey }) {
@@ -80,10 +77,9 @@ export function Overview() {
 
   return <>
     <PageHeader title="Market overview" sub={<>Everything that matters for the next session — from the {fmtDate(D.asof)} close.</>}
-      actions={<><Link className="btn" to="/focus"><IconTarget />Focus</Link><Link className="btn primary" to="/swing">Swing setups →</Link></>} />
+      actions={<><Link className="btn" to="/focus">Focus</Link><Link className="btn primary" to="/swing">Swing setups →</Link></>} />
 
     <section className="card hero" data-testid="stat-regime">
-      <div className={`hero-bar ${reg.level}`} />
       <div className="hero-in">
         <Gauge pass={reg.pass} total={reg.known} level={reg.level} />
         <div>
@@ -104,21 +100,21 @@ export function Overview() {
     </section>
 
     <div className="grid four" style={{ marginTop: 18 }}>
-      <Kpi testid="stat-breadth" icon={<IconPulse />} tone={breadth && breadth.latest >= 0 ? 'pos' : 'neg'} label="Breadth oscillator"
+      <Kpi testid="stat-breadth" label="Breadth oscillator"
         value={breadth ? `${breadth.latest >= 0 ? '+' : ''}${breadth.latest.toFixed(1)}` : '—'} valueTone={breadth ? (breadth.latest >= 0 ? 'pos' : 'neg') : undefined}
         sub={breadth ? `${breadth.n.toLocaleString('en-IN')} stocks · ±40 marks extremes` : ''}
         chart={breadth ? <AreaSpark values={breadth.osc.slice(-60)} zero /> : null} />
-      <Kpi testid="stat-fii" icon={<IconFlow />} tone="info" label="FII net this month"
+      <Kpi testid="stat-fii" label="FII net this month"
         value={month ? crore(month.fii) : '—'} valueTone={month ? (month.fii >= 0 ? 'pos' : 'neg') : undefined}
         sub={month ? <>DII {crore(month.dii)}{month.to ? ` · to ${fmtDate(month.to)}` : ''}</> : ''}
         chart={monthDays.length ? <MiniBars values={monthDays} /> : null} />
-      <Kpi icon={<IconTarget />} tone="violet" label="Participation today"
+      <Kpi label="Participation today"
         value={withD1.length ? `${Math.round((up / withD1.length) * 100)}%` : '—'}
         sub={<><span className="pos">{up.toLocaleString('en-IN')} up</span> · <span className="neg">{down.toLocaleString('en-IN')} down</span> · {leaders} RS-80 leaders in uptrends</>}
         chart={withD1.length ? <div className="hbar-track" style={{ marginTop: 14, height: 8 }}>
           <div className="hbar-fill" style={{ left: 0, width: `${(up / withD1.length) * 100}%`, background: 'var(--pos)' }} />
           <div className="hbar-fill" style={{ right: 0, width: `${(down / withD1.length) * 100}%`, background: 'var(--neg)', opacity: .8 }} /></div> : null} />
-      <Kpi testid="stat-stocks" icon={<IconLayers />} label="Stocks ranked" value={meta.n_window.toLocaleString('en-IN')}
+      <Kpi testid="stat-stocks" label="Stocks ranked" value={meta.n_window.toLocaleString('en-IN')}
         sub={`${(meta.n_stocks - meta.n_window).toLocaleString('en-IN')} left out today${meta.illiquid.length ? ` (${meta.illiquid.length} thinly traded)` : ''} · ${meta.ipo.length} new listings`}
         chart={<div className="hbar-track" style={{ marginTop: 14, height: 8 }}>
           <div className="hbar-fill" style={{ left: 0, width: `${(meta.n_window / meta.n_stocks) * 100}%`, background: 'var(--accent-grad)' }} /></div>} />

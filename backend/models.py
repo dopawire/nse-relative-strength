@@ -13,6 +13,7 @@ class MetaResponse(BaseModel):
     illiquid: list[str] = []   # thinly traded: left out of the rankings
     src: dict[str, str] = {}   # {date: source} for non-Yahoo benchmark bars
     ipo: list[dict] = []       # new listings awaiting their first ranking
+    window_dates: list[str] = []   # the RS window's sessions (oldest first)
 
 
 class LevelSummary(BaseModel):

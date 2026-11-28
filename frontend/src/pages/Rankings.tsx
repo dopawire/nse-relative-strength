@@ -1,72 +1,57 @@
-import { Fragment, useMemo, useState } from 'react';
+// Relative-strength rankings: a master–detail screen.  Left: the groups of a
+// classification level ranked by RS%; right: the selected group — its stats,
+// its RS line over the window and its stocks.  Filters apply to the stocks;
+// the group list shows how many of each group's stocks pass them.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useLevel, useLevels, useMeta } from '../api/client';
 import type { Group, Level, Member } from '../api/types';
-import { fmtPrice } from '../lib/format';
+import { fmtPrice, median } from '../lib/format';
 import { isFiltering, memberPasses, NO_FILTERS, type Filters } from '../lib/market';
 import { copyText, saveText, tvSym } from '../lib/tv';
 import { useApp } from '../components/AppContext';
-import { Sparkline } from '../components/charts';
-import { IconCopy, IconDownload } from '../components/Icons';
-import { ErrorBox, Loading, PageHeader, Segmented, rsPillStyle } from '../components/ui';
+import { LineChart, Sparkline } from '../components/charts';
+import { IconCopy, IconDownload, IconSearch, IconX } from '../components/Icons';
+import { ErrorBox, Loading, RsBadge, Tone } from '../components/ui';
 
 const EMAS = [20, 50, 100, 150, 200];
+type GroupSort = 'pct' | 'dp' | 'name';
+type MemberSort = 'p' | 'd' | 'rr' | 'l' | 'm1' | 'h' | 'a';
 
-function NumChip({ label, on, value, onToggle, onValue, testid }: {
-  label: [string, string]; on: boolean; value: number; onToggle: (v: boolean) => void; onValue: (v: number) => void; testid: string;
+interface GroupView {
+  g: Group; members: Member[]; above50: number | null; m1: number | null; leaders: number; rank: number;
+}
+
+/** RS% (0..1) → a bar + the number */
+function RsMeter({ v, w = 64 }: { v: number; w?: number }) {
+  const pct = Math.round(v * 100);
+  return (
+    <span className="meter" title={`RS% ${pct}`}>
+      <span className="meter-t" style={{ width: w }}><span style={{ width: `${Math.max(2, pct)}%` }} className={pct >= 60 ? 'hi' : pct >= 30 ? 'mid' : 'lo'} /></span>
+      <span className="meter-v">{pct}</span>
+    </span>
+  );
+}
+
+const Delta = ({ v }: { v: number | null | undefined }) => v == null || v === 0
+  ? <span className="muted">–</span>
+  : <span className={`chg ${v > 0 ? 'up' : 'dn'}`}>{v > 0 ? '▲' : '▼'} {Math.abs(v).toFixed(0)}</span>;
+
+function NumFilter({ label, unit, on, value, onChange, testid }: {
+  label: string; unit: string; on: boolean; value: number; onChange: (on: boolean, v: number) => void; testid: string;
 }) {
   return (
-    <label className={`chip ${on ? 'on' : ''}`} data-testid={testid}>
-      <input type="checkbox" checked={on} onChange={e => onToggle(e.target.checked)} />{label[0]}
-      <input type="number" value={value} min={0} step={1} onChange={e => { onValue(parseFloat(e.target.value) || 0); onToggle(true); }} />{label[1]}
+    <label className={`fchip ${on ? 'on' : ''}`} data-testid={testid}>
+      <input type="checkbox" checked={on} onChange={e => onChange(e.target.checked, value)} />
+      <span>{label}</span>
+      <input type="number" value={value} min={0} step={1} aria-label={`${label} value`}
+        onChange={e => onChange(true, parseFloat(e.target.value) || 0)} />
+      {unit && <span className="muted">{unit}</span>}
     </label>
   );
 }
 
-function MemberRows({ g, members, selected, setSel }: {
-  g: Group; members: Member[]; selected: Set<string>; setSel: (syms: string[], on: boolean) => void;
-}) {
-  const { openStock, watch, toggleWatch, theme } = useApp();
-  return (
-    <tr className="sub-row"><td colSpan={4} style={{ padding: 0 }}>
-      <div className="tbl-wrap">
-        <table className="tbl sub-tbl" data-testid={`members-${g.id}`}>
-          <thead><tr>
-            <th style={{ width: 28 }} /><th>Stock</th><th>RS (26d)</th><th className="r">RS%</th><th className="r">LTP</th>
-            <th className="r">Off high</th><th className="r">ADR</th>
-            <th className="c" title="RS line (stock / NIFTY 500) vs its 21-day EMA">RS21</th>
-            {EMAS.map(p => <th key={p} className="c" title={`price vs its ${p}-day EMA`}>{p}</th>)}
-          </tr></thead>
-          <tbody>{members.map(m => (
-            <tr key={m.s} className="clickable" data-sym={m.s} onClick={() => openStock(m.s)}>
-              <td onClick={e => e.stopPropagation()}>
-                <input type="checkbox" className="pick" checked={selected.has(m.s)} onChange={e => setSel([m.s], e.target.checked)} aria-label={`select ${m.s}`} />
-              </td>
-              <td>
-                <span className="nowrap">
-                  <button className={`star ${watch.has(m.s) ? 'on' : ''}`} title="watchlist" data-testid="star"
-                    onClick={e => { e.stopPropagation(); toggleWatch(m.s); }}>{watch.has(m.s) ? '★' : '☆'}</button>
-                  <span className="stk-name">{m.n}</span>
-                  {m.nw ? <span className="tag info" style={{ marginLeft: 6 }} title={`New listing — RS% over its ${m.nw} trading days since listing; joins the group index after a full window`}>NEW · {m.nw}d</span> : null}
-                  {m.d != null && <span className={`delta ${m.d >= 0 ? 'up' : 'dn'}`}>{m.d >= 0 ? '+' : ''}{m.d.toFixed(0)}</span>}
-                </span>
-                <span className="stk-sym" style={{ marginLeft: 21 }}>{m.s}</span>
-              </td>
-              <td><Sparkline series={m.r} w={110} h={20} /></td>
-              <td className="r"><span className="rs-pill" style={rsPillStyle(m.p, theme === 'dark')} title={m.nw ? `since listing (${m.nw} days)` : undefined}>{Math.round(m.p * 100)}%</span></td>
-              <td className="r tnum">{fmtPrice(m.l)}</td>
-              <td className="r tnum">{m.h == null ? '—' : `−${m.h.toFixed(1)}%`}</td>
-              <td className="r tnum">{m.a == null ? '—' : `${m.a.toFixed(1)}%`}</td>
-              <td className="c">{m.b === 1 ? <span className="tag pos">above</span> : m.b === 0 ? <span className="tag neg">below</span> : <span className="muted">—</span>}</td>
-              {m.e.map((e, i) => <td key={i} className="ema-cell"><i className={e === 1 ? 'up' : e === 0 ? 'dn' : ''} title={e === 1 ? 'above' : e === 0 ? 'below' : 'n/a'} /></td>)}
-            </tr>))}</tbody>
-        </table>
-      </div>
-    </td></tr>
-  );
-}
-
-function exportCsv(level: Level, groups: { g: Group; members: Member[] }[], gen: string) {
+function exportCsv(level: Level, groups: GroupView[], gen: string) {
   const head = ['level', 'group', 'group_n', 'group_rs_pct', 'group_delta', 'symbol', 'name', 'rs_pct', 'delta', 'ltp',
     'ema20', 'ema50', 'ema100', 'ema150', 'ema200', 'off_high_pct', 'adr_pct', 'rs_ema21', 'new_listing_days'];
   const esc = (s: unknown) => `"${String(s ?? '').replace(/"/g, '""')}"`;
@@ -81,121 +66,248 @@ function exportCsv(level: Level, groups: { g: Group; members: Member[] }[], gen:
   saveText(lines.join('\n'), `nse_rs_${level.key}_${gen.split(' ')[0] || 'export'}.csv`, 'text/csv');
 }
 
+const LEVEL_NOUN: Record<string, string> = { macro: 'Macro sector', sector: 'Sector', industry: 'Industry', basic: 'Sub-industry' };
+const LEVEL_PLURAL: Record<string, string> = { macro: 'macro sectors', sector: 'sectors', industry: 'industries', basic: 'sub-industries' };
+
 export function Rankings() {
   const { level = 'macro' } = useParams();
   const nav = useNavigate();
+  const loc = useLocation();
   const levels = useLevels().data;
   const meta = useMeta().data;
   const lq = useLevel(level);
-  const { watch, toast, theme } = useApp();
-  const loc = useLocation();
+  const { watch, toggleWatch, openStock, toast } = useApp();
   const [f, setF] = useState<Filters>(() => ({ ...NO_FILTERS, q: (loc.state as { q?: string } | null)?.q ?? '' }));
-  const [hiV, setHiV] = useState(20), [adrV, setAdrV] = useState(3), [rsV, setRsV] = useState(80);
-  const [sort, setSort] = useState<{ key: 'pct' | 'name'; asc: boolean }>({ key: 'pct', asc: false });
-  const [open, setOpen] = useState<Set<number>>(new Set());
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
+  const [num, setNum] = useState({ hi: 20, adr: 3, rs: 80 });
+  const [gsort, setGsort] = useState<{ k: GroupSort; asc: boolean }>({ k: 'pct', asc: false });
+  const [msort, setMsort] = useState<{ k: MemberSort; asc: boolean }>({ k: 'p', asc: false });
+  const [sel, setSel] = useState<number | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const detail = useRef<HTMLDivElement>(null);
   const filtering = isFiltering(f);
-  const view = useMemo(() => {
+
+  // groups with their filtered members and summary stats, in the chosen order
+  const groups = useMemo<GroupView[]>(() => {
     const data = lq.data;
     if (!data) return [];
     const q = f.q.trim().toLowerCase();
-    const gs = [...data.groups].sort((a, b) => sort.key === 'pct'
-      ? (sort.asc ? a.pct - b.pct : b.pct - a.pct)
-      : (sort.asc ? b.name.localeCompare(a.name) : a.name.localeCompare(b.name)));
-    return gs.map(g => {
+    const rankOf = new Map([...data.groups].sort((a, b) => b.pct - a.pct).map((g, i) => [g.id, i + 1]));
+    const out = data.groups.map(g => {
       const gm = !!q && g.name.toLowerCase().includes(q);
       const members = filtering ? g.members.filter(m => memberPasses(m, f, gm, watch)) : g.members;
-      return { g, members };
+      const known = g.members.filter(m => m.e[1] !== -1);
+      return {
+        g, members, rank: rankOf.get(g.id) ?? 0,
+        above50: known.length ? known.filter(m => m.e[1] === 1).length / known.length : null,
+        m1: median(g.members.map(m => m.m1)),
+        leaders: g.members.filter(m => (m.rr ?? 0) >= 80).length,
+      };
     }).filter(x => !filtering || x.members.length);
-  }, [lq.data, f, sort, filtering, watch]);
+    const dir = gsort.asc ? 1 : -1;
+    return out.sort((a, b) => gsort.k === 'name' ? dir * a.g.name.localeCompare(b.g.name)
+      : gsort.k === 'dp' ? dir * ((a.g.dp ?? -999) - (b.g.dp ?? -999)) : dir * (a.g.pct - b.g.pct));
+  }, [lq.data, f, gsort, filtering, watch]);
+
+  useEffect(() => { setSel(null); }, [level]);
+  // keep a valid selection: the first group when none / when it left the list
+  useEffect(() => {
+    if (!groups.length) { if (sel != null) setSel(null); return; }
+    if (sel == null || !groups.some(x => x.g.id === sel)) setSel(groups[0].g.id);
+  }, [groups, sel]);
+
+  const cur = groups.find(x => x.g.id === sel) ?? null;
+  const members = useMemo(() => {
+    if (!cur) return [];
+    const k = msort.k, dir = msort.asc ? 1 : -1;
+    const v = (m: Member) => (m[k] as number | null | undefined) ?? null;
+    return [...cur.members].sort((a, b) => {
+      const va = v(a), vb = v(b);
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      return dir * (va - vb);
+    });
+  }, [cur, msort]);
 
   const ipoHits = useMemo(() => {
     const t = f.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    if (!t.length || !meta) return [];
-    return meta.ipo.filter(i => t.every(w => (i.n + ' ' + i.s).toLowerCase().includes(w)));
+    return !t.length || !meta ? [] : meta.ipo.filter(i => t.every(w => (i.n + ' ' + i.s).toLowerCase().includes(w)));
   }, [f.q, meta]);
 
-  const setSel = (syms: string[], on: boolean) => setSelected(prev => {
+  const togglePick = (syms: string[], on: boolean) => setPicked(prev => {
     const n = new Set(prev);
     syms.forEach(s => (on ? n.add(s) : n.delete(s)));
     return n;
   });
-  const toggleEma = (i: number) => setF(x => ({ ...x, ema: x.ema.includes(i) ? x.ema.filter(e => e !== i) : [...x.ema, i] }));
-  const shownStocks = view.reduce((a, x) => a + (filtering ? x.members.length : x.g.n), 0);
-  const sortBy = (key: 'pct' | 'name') => setSort(s => (s.key === key ? { key, asc: !s.asc } : { key, asc: key === 'name' }));
-  const arrow = (key: string) => sort.key === key ? <span className="arrow">{sort.asc ? '▲' : '▼'}</span> : null;
+  const choose = (id: number) => {
+    setSel(id);
+    if (window.matchMedia('(max-width: 1100px)').matches) detail.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const onListKey = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const i = groups.findIndex(x => x.g.id === sel);
+    const j = Math.max(0, Math.min(groups.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)));
+    setSel(groups[j].g.id);
+    document.querySelector(`[data-gid="${groups[j].g.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  };
+  const gHead = (k: GroupSort, label: string, cls = '') => (
+    <th className={`sortable ${cls} ${gsort.k === k ? 'sorted' : ''}`} onClick={() => setGsort(s => ({ k, asc: s.k === k ? !s.asc : k === 'name' }))}>
+      {label}{gsort.k === k && <span className="arrow">{gsort.asc ? '↑' : '↓'}</span>}
+    </th>
+  );
+  const mHead = (k: MemberSort, label: string, tip?: string) => (
+    <th className={`sortable r ${msort.k === k ? 'sorted' : ''}`} title={tip} onClick={() => setMsort(s => ({ k, asc: s.k === k ? !s.asc : false }))}>
+      {label}{msort.k === k && <span className="arrow">{msort.asc ? '↑' : '↓'}</span>}
+    </th>
+  );
+  const noun = LEVEL_NOUN[level] ?? 'Group';
+  const shownStocks = groups.reduce((a, x) => a + x.members.length, 0);
+  const winDates = meta?.window_dates ?? [];
 
   return <>
-    <PageHeader title="Relative strength rankings"
-      sub={<>Equal-weight group indexes vs NIFTY 500 over a {meta?.window ?? 26}-session window{meta ? ` · ${meta.drange}` : ''} — expand a group for its stocks.</>}
-      actions={<Segmented label="Classification level" testid="level-tabs" value={level}
-        options={(levels ?? []).map(l => ({ value: l.key, label: `${l.label} · ${l.n_groups}` }))}
-        onChange={k => { setOpen(new Set()); nav(`/rankings/${k}`); }} />} />
-    <section className="card">
-      <div className="toolbar">
-        <input className="input grow" placeholder="Filter groups or stocks…" value={f.q} data-testid="rank-search"
+    <div className="page-head">
+      <div>
+        <h2 className="ph-t">Relative strength</h2>
+        <div className="ph-s">Equal-weight group indexes vs NIFTY 500, last {meta?.window ?? 26} sessions{meta ? ` · ${meta.drange.replace('→', '–')}` : ''}</div>
+      </div>
+      <nav className="subnav" data-testid="level-tabs" aria-label="Classification level">
+        {(levels ?? []).map(l => <button key={l.key} type="button" className={l.key === level ? 'on' : ''}
+          onClick={() => nav(`/rankings/${l.key}`)}>{LEVEL_NOUN[l.key] ?? l.label}<span>{l.n_groups}</span></button>)}
+      </nav>
+    </div>
+
+    <div className="filterbar">
+      <div className="fsearch">
+        <IconSearch />
+        <input placeholder={`Filter ${LEVEL_PLURAL[level] ?? 'groups'} or stocks`} value={f.q} data-testid="rank-search"
           onChange={e => setF(x => ({ ...x, q: e.target.value }))} onKeyDown={e => { if (e.key === 'Escape') setF(x => ({ ...x, q: '' })); }} />
-        <span className="muted" style={{ fontSize: 12 }}>Above EMA</span>
-        <span className="ema-set" data-testid="ema-filters">{EMAS.map((p, i) =>
-          <button key={p} type="button" className={f.ema.includes(i) ? 'on' : ''} onClick={() => toggleEma(i)}>{p}</button>)}</span>
-        <span className="toolbar-sep" />
-        <NumChip testid="f-hi" label={['≤', '% off high']} on={f.hi != null} value={hiV} onValue={setHiV} onToggle={on => setF(x => ({ ...x, hi: on ? hiV : null }))} />
-        <NumChip testid="f-adr" label={['ADR ≥', '%']} on={f.adr != null} value={adrV} onValue={setAdrV} onToggle={on => setF(x => ({ ...x, adr: on ? adrV : null }))} />
-        <NumChip testid="f-rs" label={['RS% ≥', '']} on={f.rs != null} value={rsV} onValue={setRsV} onToggle={on => setF(x => ({ ...x, rs: on ? rsV : null }))} />
-        <label className={`chip ${f.rse ? 'on' : ''}`} data-testid="f-rse"><input type="checkbox" checked={f.rse} onChange={e => setF(x => ({ ...x, rse: e.target.checked }))} />RS line &gt; EMA21</label>
-        <button type="button" className={`chip ${f.watchOnly ? 'on' : ''}`} data-testid="f-watch" onClick={() => setF(x => ({ ...x, watchOnly: !x.watchOnly }))}>★ Watchlist</button>
-        {filtering && <button className="btn sm ghost" onClick={() => setF(NO_FILTERS)}>Clear</button>}
+        {f.q && <button type="button" className="fclear" aria-label="Clear search" onClick={() => setF(x => ({ ...x, q: '' }))}><IconX /></button>}
       </div>
-      <div className="selbar">
-        <span data-testid="sel-count"><b>{selected.size}</b> selected</span>
-        <button className="btn sm" onClick={() => setSel(view.flatMap(x => x.members.map(m => m.s)), true)}>Select visible</button>
-        <button className="btn sm" disabled={!selected.size} onClick={() => setSelected(new Set())}>Clear</button>
-        <button className="btn sm" disabled={!selected.size} data-testid="copy-tv" onClick={async () =>
-          toast((await copyText([...selected].map(tvSym).join(',\n'))) ? `Copied ${selected.size}` : 'Copy failed')}><IconCopy />Copy for TradingView</button>
-        <button className="btn sm" disabled={!selected.size} onClick={() => saveText([...selected].map(tvSym).join(',\n'), 'tradingview_watchlist.txt')}><IconDownload />.txt</button>
-        <span style={{ flex: 1 }} />
-        {filtering && <span className="muted" data-testid="filter-info">{view.length} group(s), {shownStocks} stock(s)</span>}
-        {ipoHits.length > 0 && <Link className="btn sm" to="/listings" state={{ q: f.q }}>{ipoHits.length === 1 ? `${ipoHits[0].s} in New listings →` : `${ipoHits.length} in New listings →`}</Link>}
-        <button className="btn sm" disabled={!lq.data} data-testid="csv" onClick={() => lq.data && exportCsv(lq.data, view, meta?.generated ?? '')}><IconDownload />CSV</button>
+      <div className="fgroup" data-testid="ema-filters" role="group" aria-label="Price above these EMAs">
+        <span className="flabel">Above EMA</span>
+        {EMAS.map((p, i) => <button key={p} type="button" aria-pressed={f.ema.includes(i)} className={f.ema.includes(i) ? 'on' : ''}
+          onClick={() => setF(x => ({ ...x, ema: x.ema.includes(i) ? x.ema.filter(e => e !== i) : [...x.ema, i] }))}>{p}</button>)}
       </div>
-      {lq.error ? <ErrorBox error={lq.error} /> : !lq.data ? <Loading /> : (
-        <div className="tbl-wrap">
-          <table className="tbl" data-testid="level-table">
-            <thead><tr>
-              <th className="sortable" onClick={() => sortBy('name')}>{lq.data.label}{arrow('name')}</th>
-              <th className="hide-sm">Relative strength (26d)</th>
-              <th className="r sortable" onClick={() => sortBy('pct')} title="the group's RS percentile over the window (RS_STS%)">RS%{arrow('pct')}</th>
-              <th className="r hide-sm" title="change vs the previous snapshot">Δ</th>
-            </tr></thead>
-            <tbody>{view.map(({ g, members }) => {
-              const isOpen = open.has(g.id);
-              const syms = members.map(m => m.s);
-              const allSel = syms.length > 0 && syms.every(s => selected.has(s));
-              const nNew = g.members.length - g.n;
-              return <Fragment key={g.id}>
-                <tr className="grp-row" data-gid={g.id} onClick={() => setOpen(o => { const n = new Set(o); if (n.has(g.id)) n.delete(g.id); else n.add(g.id); return n; })}>
+      <NumFilter testid="f-hi" label="Off high ≤" unit="%" on={f.hi != null} value={num.hi}
+        onChange={(on, v) => { setNum(n => ({ ...n, hi: v })); setF(x => ({ ...x, hi: on ? v : null })); }} />
+      <NumFilter testid="f-adr" label="ADR ≥" unit="%" on={f.adr != null} value={num.adr}
+        onChange={(on, v) => { setNum(n => ({ ...n, adr: v })); setF(x => ({ ...x, adr: on ? v : null })); }} />
+      <NumFilter testid="f-rs" label="RS% ≥" unit="" on={f.rs != null} value={num.rs}
+        onChange={(on, v) => { setNum(n => ({ ...n, rs: v })); setF(x => ({ ...x, rs: on ? v : null })); }} />
+      <label className={`fchip ${f.rse ? 'on' : ''}`} data-testid="f-rse"><input type="checkbox" checked={f.rse} onChange={e => setF(x => ({ ...x, rse: e.target.checked }))} />RS line above EMA21</label>
+      <label className={`fchip ${f.watchOnly ? 'on' : ''}`} data-testid="f-watch"><input type="checkbox" checked={f.watchOnly} onChange={e => setF(x => ({ ...x, watchOnly: e.target.checked }))} />Watchlist</label>
+      <div className="fend">
+        {filtering && <span className="fcount" data-testid="filter-info">{shownStocks.toLocaleString('en-IN')} stocks in {groups.length} group(s)</span>}
+        {filtering && <button type="button" className="btn sm ghost" onClick={() => setF(NO_FILTERS)}>Reset</button>}
+        {ipoHits.length > 0 && <Link className="btn sm" to="/listings" state={{ q: f.q }}>{ipoHits.length === 1 ? `${ipoHits[0].s} is a new listing →` : `${ipoHits.length} new listings →`}</Link>}
+        <button type="button" className="btn sm" disabled={!lq.data} data-testid="csv" onClick={() => lq.data && exportCsv(lq.data, groups, meta?.generated ?? '')}><IconDownload />CSV</button>
+      </div>
+    </div>
+
+    {lq.error ? <ErrorBox error={lq.error} /> : !lq.data ? <Loading /> : (
+      <div className="md">
+        <section className="md-list panel" aria-label={LEVEL_PLURAL[level] ?? 'groups'}>
+          <div className="tbl-wrap md-scroll">
+            <table className="tbl dense" data-testid="level-table" tabIndex={0} onKeyDown={onListKey}>
+              <thead><tr>
+                <th className="num">#</th>{gHead('name', noun)}{gHead('pct', 'RS%', 'r')}{gHead('dp', 'Δ', 'r')}
+              </tr></thead>
+              <tbody>{groups.map(x => (
+                <tr key={x.g.id} data-gid={x.g.id} className={`grp-row ${x.g.id === sel ? 'sel' : ''}`} onClick={() => choose(x.g.id)}>
+                  <td className="num muted">{x.rank}</td>
                   <td>
-                    <span className="grp-name">
-                      <input type="checkbox" className="pick" checked={allSel} title="select the group's stocks" onClick={e => e.stopPropagation()} onChange={e => setSel(syms, e.target.checked)} />
-                      <span className={`caret ${isOpen ? 'open' : ''}`}>▶</span>{g.name}
-                      <span className="cnt">{filtering ? members.length : g.n}</span>
-                      {!filtering && nNew > 0 && <span className="tag info" title="new listings shown in the group, not yet in its RS index">+{nNew} new</span>}
-                    </span>
+                    <div className="gname">{x.g.name}</div>
+                    <div className="gsub">{filtering ? <><b>{x.members.length}</b> of {x.g.n} match</> : <>{x.g.n} stocks{x.g.members.length > x.g.n ? ` · ${x.g.members.length - x.g.n} new` : ''}</>}</div>
                   </td>
-                  <td className="hide-sm"><Sparkline series={g.r} w={150} h={26} /></td>
-                  <td className="r"><span className="rsbar"><span className="rsbar-t hide-sm"><span style={{ width: `${Math.max(3, g.pct * 100)}%`, background: g.pct >= 0.5 ? 'linear-gradient(90deg, var(--pos-2), var(--pos))' : 'linear-gradient(90deg, var(--surface-3), var(--text-3))' }} /></span>
-                    <span className="rs-pill" style={rsPillStyle(g.pct, theme === 'dark')}>{Math.round(g.pct * 100)}%</span></span></td>
-                  <td className="r hide-sm">{g.dp != null ? <span className={`delta ${g.dp >= 0 ? 'up' : 'dn'}`}>{g.dp >= 0 ? '+' : ''}{g.dp.toFixed(0)}</span> : <span className="muted">—</span>}</td>
-                </tr>
-                {isOpen && <MemberRows g={g} members={members} selected={selected} setSel={setSel} />}
-              </Fragment>;
-            })}</tbody>
-          </table>
-          {!view.length && <div className="empty">No stocks match these filters.</div>}
-        </div>
-      )}
-    </section>
-    <p className="foot">RS_STS% = the percentile of today's relative-strength value (group or stock ÷ NIFTY 500) within its own last {meta?.window ?? 26} sessions; Δ = change since the previous build. Click a group to expand it, a stock for its RS chart; ☆ adds it to your watchlist.</p>
+                  <td className="r"><RsMeter v={x.g.pct} /></td>
+                  <td className="r"><Delta v={x.g.dp} /></td>
+                </tr>))}</tbody>
+            </table>
+            {!groups.length && <div className="empty">No stocks match these filters.</div>}
+          </div>
+        </section>
+
+        <section className="md-detail" ref={detail} aria-live="polite">
+          {cur && <>
+            <div className="panel detail-head">
+              <div className="dh-top">
+                <div>
+                  <div className="eyebrow">{noun} · #{cur.rank} of {lq.data.groups.length}</div>
+                  <h3 className="dh-t">{cur.g.name}</h3>
+                </div>
+                <div className="dh-rs"><span className="big">{Math.round(cur.g.pct * 100)}</span><span className="muted">RS%</span><Delta v={cur.g.dp} /></div>
+              </div>
+              <dl className="stats">
+                <div><dt>Stocks</dt><dd>{cur.g.n}{cur.g.members.length > cur.g.n && <small> +{cur.g.members.length - cur.g.n} new</small>}</dd></div>
+                <div><dt>Above 50-day EMA</dt><dd>{cur.above50 == null ? '—' : `${Math.round(cur.above50 * 100)}%`}</dd></div>
+                <div><dt>Median 1M</dt><dd><Tone v={cur.m1} /></dd></div>
+                <div><dt>RS ≥ 80</dt><dd>{cur.leaders}</dd></div>
+              </dl>
+              {winDates.length === cur.g.r.length && <div className="dh-chart">
+                <LineChart dates={winDates} height={110} fmt={v => v.toFixed(3)}
+                  series={[{ values: cur.g.r, color: 'var(--accent)', label: 'vs NIFTY 500', width: 1.5 }]} />
+              </div>}
+            </div>
+
+            <div className="panel">
+              <div className="panel-h">
+                <span className="panel-t">Stocks <span className="muted">{members.length}{filtering ? ` of ${cur.g.members.length}` : ''}</span></span>
+                <button type="button" className="btn sm ghost" onClick={() => togglePick(members.map(m => m.s), true)}>Select visible</button>
+              </div>
+              <div className="tbl-wrap">
+                <table className="tbl dense" data-testid={`members-${cur.g.id}`}>
+                  <thead><tr>
+                    <th className="cb"><input type="checkbox" className="pick" aria-label="select all shown"
+                      checked={members.length > 0 && members.every(m => picked.has(m.s))} onChange={e => togglePick(members.map(m => m.s), e.target.checked)} /></th>
+                    <th>Stock</th>
+                    {mHead('p', 'RS%', 'percentile of today’s RS value within the window')}{mHead('d', 'Δ', 'change since the previous build')}
+                    {mHead('rr', 'Rating', 'RS rating 1-99 vs all stocks (12-month weighted)')}{mHead('l', 'Price')}{mHead('m1', '1M')}
+                    {mHead('h', 'Off high', '% below the 52-week high')}{mHead('a', 'ADR', 'average daily range, 20 sessions')}
+                    <th className="c" title="RS line (stock ÷ NIFTY 500) vs its 21-day EMA">RS21</th>
+                    <th className="c" title="price above (filled) / below (hollow) its 20 / 50 / 100 / 150 / 200-day EMA">EMAs</th>
+                    <th className="hide-md">26d</th>
+                  </tr></thead>
+                  <tbody>{members.map(m => (
+                    <tr key={m.s} className="clickable" data-sym={m.s} onClick={() => openStock(m.s)}>
+                      <td className="cb" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="pick" checked={picked.has(m.s)} onChange={e => togglePick([m.s], e.target.checked)} aria-label={`select ${m.s}`} />
+                      </td>
+                      <td>
+                        <div className="tick">
+                          <button type="button" className={`star ${watch.has(m.s) ? 'on' : ''}`} data-testid="star" aria-label="watchlist"
+                            onClick={e => { e.stopPropagation(); toggleWatch(m.s); }}>{watch.has(m.s) ? '★' : '☆'}</button>
+                          <span className="tick-s">{m.s}</span>
+                          {m.nw ? <span className="badge" title={`New listing — RS over its ${m.nw} sessions since listing`}>new · {m.nw}d</span> : null}
+                        </div>
+                        <div className="tick-n">{m.n}</div>
+                      </td>
+                      <td className="r"><RsMeter v={m.p} w={32} /></td>
+                      <td className="r"><Delta v={m.d} /></td>
+                      <td className="r"><RsBadge v={m.rr} /></td>
+                      <td className="r">{fmtPrice(m.l)}</td>
+                      <td className="r"><Tone v={m.m1} /></td>
+                      <td className="r">{m.h == null ? '—' : `${m.h.toFixed(1)}%`}</td>
+                      <td className="r">{m.a == null ? '—' : `${m.a.toFixed(1)}%`}</td>
+                      <td className="c">{m.b === 1 ? <span className="chg up" title="above its EMA21">▲</span> : m.b === 0 ? <span className="chg dn" title="below its EMA21">▼</span> : <span className="muted">–</span>}</td>
+                      <td className="c"><span className="emas">{m.e.map((e, i) => <i key={i} className={e === 1 ? 'up' : e === 0 ? 'dn' : ''} title={`${EMAS[i]}-day EMA: ${e === 1 ? 'above' : e === 0 ? 'below' : 'n/a'}`} />)}</span></td>
+                      <td className="hide-md"><Sparkline series={m.r} w={64} h={18} /></td>
+                    </tr>))}</tbody>
+                </table>
+                {!members.length && <div className="empty">No stocks in this group match the filters.</div>}
+              </div>
+            </div>
+          </>}
+        </section>
+      </div>
+    )}
+
+    {picked.size > 0 && <div className="actionbar" role="region" aria-label="Selection">
+      <span data-testid="sel-count"><b>{picked.size}</b> selected</span>
+      <button type="button" className="btn sm" data-testid="copy-tv" onClick={async () =>
+        toast((await copyText([...picked].map(tvSym).join(',\n'))) ? `Copied ${picked.size} for TradingView` : 'Copy failed')}><IconCopy />Copy for TradingView</button>
+      <button type="button" className="btn sm" onClick={() => saveText([...picked].map(tvSym).join(',\n'), 'tradingview_watchlist.txt')}><IconDownload />.txt</button>
+      <button type="button" className="btn sm ghost" onClick={() => setPicked(new Set())}>Clear</button>
+    </div>}
+    <p className="foot">RS% ranks today's relative-strength value (group or stock ÷ NIFTY 500) within its own last {meta?.window ?? 26} sessions; Δ is the change since the previous build. ↑ ↓ moves through the list; click a stock for its chart.</p>
   </>;
 }

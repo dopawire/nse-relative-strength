@@ -298,11 +298,10 @@ export function AreaSpark({ values, color, height = 36, zero = false }: { values
     <div ref={ref} className="chart">
       <svg width={W} height={height} aria-hidden="true">
         <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={c} stopOpacity={0.28} /><stop offset="100%" stopColor={c} stopOpacity={0} /></linearGradient></defs>
+          <stop offset="0%" stopColor={c} stopOpacity={0.14} /><stop offset="100%" stopColor={c} stopOpacity={0} /></linearGradient></defs>
         {zero && lo < 0 && hi > 0 && <line x1={0} x2={W} y1={Y(0)} y2={Y(0)} className="grid-line" strokeDasharray="3 3" />}
         <path d={`${line}L${W},${height}L0,${height}Z`} fill={`url(#${id})`} />
-        <path d={line} fill="none" stroke={c} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
-        <circle cx={X(values.length - 1)} cy={Y(values[values.length - 1])} r={2.8} fill={c} />
+        <path d={line} fill="none" stroke={c} strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round" />
       </svg>
     </div>
   );
@@ -338,11 +337,11 @@ export function Gauge({ pass, total, level }: { pass: number; total: number; lev
   };
   return (
     <div className="gauge" role="img" aria-label={`${pass} of ${total} regime checks pass`}>
-      <svg width={168} height={96}>
-        {Array.from({ length: total }, (_, i) => <path key={i} d={seg(i)} fill="none" strokeWidth={12} strokeLinecap="round"
-          stroke={i < pass ? c : 'var(--surface-3)'} style={i < pass ? { filter: `drop-shadow(0 0 6px ${c})` } : undefined} />)}
+      <svg viewBox="0 0 168 96">
+        {Array.from({ length: total }, (_, i) => <path key={i} d={seg(i)} fill="none" strokeWidth={10} strokeLinecap="butt"
+          stroke={i < pass ? c : 'var(--surface-3)'} />)}
       </svg>
-      <div className="gauge-v"><b>{pass}<span style={{ fontSize: 15, color: 'var(--text-3)' }}>/{total}</span></b><span>checks pass</span></div>
+      <div className="gauge-v"><b>{pass}<span style={{ fontSize: 14, color: 'var(--text-3)', fontWeight: 500 }}> / {total}</span></b><span>checks pass</span></div>
     </div>
   );
 }

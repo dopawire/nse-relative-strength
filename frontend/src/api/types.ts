@@ -10,7 +10,7 @@ export interface IpoWatch {
 export interface Meta {
   benchmark: string; window: number; drange: string; generated: string;
   n_stocks: number; n_groups_per_level: number[]; n_window: number;
-  excluded: string[]; illiquid: string[]; src: Record<string, string>; ipo: IpoWatch[];
+  excluded: string[]; illiquid: string[]; src: Record<string, string>; ipo: IpoWatch[]; window_dates?: string[];
 }
 
 export interface LevelSummary { key: string; label: string; n_groups: number }
