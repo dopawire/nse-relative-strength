@@ -282,3 +282,67 @@ export function Donut({ segs, total, line1, line2 }: { segs: DonutSeg[]; total: 
     </div>
   );
 }
+
+// ---------------------------------------------------------------- KPI minis
+/** smooth area sparkline (KPI cards), coloured by the last value's sign or a fixed colour */
+export function AreaSpark({ values, color, height = 36, zero = false }: { values: number[]; color?: string; height?: number; zero?: boolean }) {
+  const [ref, W] = useWidth<HTMLDivElement>(200);
+  if (values.length < 2) return <div ref={ref} />;
+  const lo = Math.min(...values, zero ? 0 : Infinity), hi = Math.max(...values, zero ? 0 : -Infinity), rng = hi - lo || 1;
+  const X = (i: number) => (W * i) / (values.length - 1);
+  const Y = (v: number) => 2 + (height - 4) * (1 - (v - lo) / rng);
+  const c = color ?? (values[values.length - 1] >= 0 ? 'var(--pos)' : 'var(--neg)');
+  const line = values.map((v, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join('');
+  const id = `g${Math.round(Math.random() * 1e9)}`;
+  return (
+    <div ref={ref} className="chart">
+      <svg width={W} height={height} aria-hidden="true">
+        <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity={0.28} /><stop offset="100%" stopColor={c} stopOpacity={0} /></linearGradient></defs>
+        {zero && lo < 0 && hi > 0 && <line x1={0} x2={W} y1={Y(0)} y2={Y(0)} className="grid-line" strokeDasharray="3 3" />}
+        <path d={`${line}L${W},${height}L0,${height}Z`} fill={`url(#${id})`} />
+        <path d={line} fill="none" stroke={c} strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx={X(values.length - 1)} cy={Y(values[values.length - 1])} r={2.8} fill={c} />
+      </svg>
+    </div>
+  );
+}
+
+/** small up / down bars (e.g. FII net per session this month) */
+export function MiniBars({ values, height = 36 }: { values: number[]; height?: number }) {
+  const [ref, W] = useWidth<HTMLDivElement>(200);
+  const m = Math.max(...values.map(Math.abs), 1), mid = height / 2;
+  const slot = W / Math.max(1, values.length), bw = Math.max(2, Math.min(10, slot * 0.6));
+  return (
+    <div ref={ref} className="chart">
+      <svg width={W} height={height} aria-hidden="true">
+        <line x1={0} x2={W} y1={mid} y2={mid} className="grid-line" />
+        {values.map((v, i) => {
+          const h = Math.max(1.5, (Math.abs(v) / m) * (mid - 2));
+          return <rect key={i} x={slot * i + (slot - bw) / 2} y={v >= 0 ? mid - h : mid} width={bw} height={h} rx={1.5}
+            fill={v >= 0 ? 'var(--pos)' : 'var(--neg)'} opacity={0.85} />;
+        })}
+      </svg>
+    </div>
+  );
+}
+
+/** semicircle gauge of the regime checks: `pass` of `total` segments lit */
+export function Gauge({ pass, total, level }: { pass: number; total: number; level: 'on' | 'mixed' | 'off' }) {
+  const c = level === 'on' ? 'var(--pos)' : level === 'mixed' ? 'var(--warn)' : 'var(--neg)';
+  const R = 70, cx = 84, cy = 86, gap = 0.06;
+  const seg = (i: number) => {
+    const a0 = Math.PI + (Math.PI * i) / total + gap / 2, a1 = Math.PI + (Math.PI * (i + 1)) / total - gap / 2;
+    const p = (a: number, r: number) => `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`;
+    return `M${p(a0, R)}A${R},${R} 0 0 1 ${p(a1, R)}`;
+  };
+  return (
+    <div className="gauge" role="img" aria-label={`${pass} of ${total} regime checks pass`}>
+      <svg width={168} height={96}>
+        {Array.from({ length: total }, (_, i) => <path key={i} d={seg(i)} fill="none" strokeWidth={12} strokeLinecap="round"
+          stroke={i < pass ? c : 'var(--surface-3)'} style={i < pass ? { filter: `drop-shadow(0 0 6px ${c})` } : undefined} />)}
+      </svg>
+      <div className="gauge-v"><b>{pass}<span style={{ fontSize: 15, color: 'var(--text-3)' }}>/{total}</span></b><span>checks pass</span></div>
+    </div>
+  );
+}

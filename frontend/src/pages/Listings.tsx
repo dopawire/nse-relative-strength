@@ -4,7 +4,7 @@ import { useMeta } from '../api/client';
 import type { IpoWatch } from '../api/types';
 import { fmtDate, fmtPrice } from '../lib/format';
 import { useApp } from '../components/AppContext';
-import { Card, Empty, ErrorBox, Loading } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader } from '../components/ui';
 
 const pct = (v: number | null) => v == null ? <span className="muted">—</span>
   : <span className={v > 0 ? 'pos' : v < 0 ? 'neg' : ''}>{v > 0 ? '+' : ''}{v.toFixed(1)}%</span>;
@@ -50,10 +50,8 @@ export function Listings() {
   const under = measured.filter(i => i.xret! < 0).sort((a, b) => a.xret! - b.xret!);
   const fresh = shown.filter(i => i.xret == null);
   return <>
-    <div className="sec-h" style={{ marginBottom: 14 }}>
-      <p className="page-intro" style={{ margin: 0 }}>Listings awaiting their first {win}-day ranking · {out.length} of {measured.length} beating NIFTY 500 since the listing-day close · click one for its RS chart.</p>
-      <input className="input" style={{ width: 260 }} placeholder="Filter new listings…" value={q} onChange={e => setQ(e.target.value)} data-testid="ipo-search" />
-    </div>
+    <PageHeader title="New listings" sub={<>Awaiting their first {win}-day ranking · {out.length} of {measured.length} beating NIFTY 500 since the listing-day close · click one for its RS chart.</>}
+      actions={<input className="input" style={{ width: 260 }} placeholder="Filter new listings…" value={q} onChange={e => setQ(e.target.value)} data-testid="ipo-search" />} />
     {!ipo.length ? <Empty>No new listings awaiting ranking right now.</Empty>
       : !shown.length ? <Empty>No new listings match “{q}”.</Empty> : <div data-testid="listings">
         <Table title="Outperformers" list={out} note="ranked best first" win={win} />

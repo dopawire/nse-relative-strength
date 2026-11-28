@@ -3,7 +3,7 @@ import { useAllLevels, useDecide } from '../api/client';
 import { fmtDate, mean, median } from '../lib/format';
 import { scanGroups, stockIndex, type ScanDim } from '../lib/market';
 import { Donut, type DonutSeg } from '../components/charts';
-import { Card, ErrorBox, Loading, Segmented } from '../components/ui';
+import { Card, ErrorBox, Loading, PageHeader, Segmented } from '../components/ui';
 
 const DIMS: { value: ScanDim; label: string; unit: string }[] = [
   { value: 'sector', label: 'Sector', unit: 'sectors' }, { value: 'basic', label: 'Sub-industry', unit: 'sub-industries' },
@@ -33,7 +33,8 @@ export function Scans() {
   }
   const n = sg.total, unit = DIMS.find(d => d.value === dim)!.unit;
   const nGroups = sg.keys.filter(k => sg.count(k)).length;
-  return (
+  return (<>
+    <PageHeader title="Scans" sub="Where this month's strongest stocks come from — by sector, sub-industry and size." />
     <Card title="Scan summary · 1-month gainers" sub={`${n} stocks up ≥ 14% in 20 sessions, ≥ ₹10 cr/day, price ≥ ₹100 · as of ${fmtDate(asof)}`}
       tools={<Segmented label="Group by" testid="scan-dim" value={dim} onChange={setDim} options={DIMS} />}>
       <div className="donut-wrap">
@@ -63,5 +64,5 @@ export function Scans() {
         </div>
       </div>
     </Card>
-  );
+  </>);
 }

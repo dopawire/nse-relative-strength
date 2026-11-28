@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useLevel, useLevels, useMeta } from '../api/client';
 import type { Group, Level, Member } from '../api/types';
 import { fmtPrice } from '../lib/format';
@@ -8,7 +8,7 @@ import { copyText, saveText, tvSym } from '../lib/tv';
 import { useApp } from '../components/AppContext';
 import { Sparkline } from '../components/charts';
 import { IconCopy, IconDownload } from '../components/Icons';
-import { ErrorBox, Loading, Segmented, rsPillStyle } from '../components/ui';
+import { ErrorBox, Loading, PageHeader, Segmented, rsPillStyle } from '../components/ui';
 
 const EMAS = [20, 50, 100, 150, 200];
 
@@ -88,7 +88,8 @@ export function Rankings() {
   const meta = useMeta().data;
   const lq = useLevel(level);
   const { watch, toast, theme } = useApp();
-  const [f, setF] = useState<Filters>(NO_FILTERS);
+  const loc = useLocation();
+  const [f, setF] = useState<Filters>(() => ({ ...NO_FILTERS, q: (loc.state as { q?: string } | null)?.q ?? '' }));
   const [hiV, setHiV] = useState(20), [adrV, setAdrV] = useState(3), [rsV, setRsV] = useState(80);
   const [sort, setSort] = useState<{ key: 'pct' | 'name'; asc: boolean }>({ key: 'pct', asc: false });
   const [open, setOpen] = useState<Set<number>>(new Set());
@@ -126,12 +127,11 @@ export function Rankings() {
   const arrow = (key: string) => sort.key === key ? <span className="arrow">{sort.asc ? '▲' : '▼'}</span> : null;
 
   return <>
-    <div className="sec-h" style={{ marginBottom: 14 }}>
-      <Segmented label="Classification level" testid="level-tabs" value={level}
+    <PageHeader title="Relative strength rankings"
+      sub={<>Equal-weight group indexes vs NIFTY 500 over a {meta?.window ?? 26}-session window{meta ? ` · ${meta.drange}` : ''} — expand a group for its stocks.</>}
+      actions={<Segmented label="Classification level" testid="level-tabs" value={level}
         options={(levels ?? []).map(l => ({ value: l.key, label: `${l.label} · ${l.n_groups}` }))}
-        onChange={k => { setOpen(new Set()); nav(`/rankings/${k}`); }} />
-      <span className="muted" style={{ fontSize: 12.5 }}>Equal-weight group indexes vs NIFTY 500 · {meta?.window ?? 26}-day window {meta ? `· ${meta.drange}` : ''}</span>
-    </div>
+        onChange={k => { setOpen(new Set()); nav(`/rankings/${k}`); }} />} />
     <section className="card">
       <div className="toolbar">
         <input className="input grow" placeholder="Filter groups or stocks…" value={f.q} data-testid="rank-search"
@@ -184,7 +184,8 @@ export function Rankings() {
                     </span>
                   </td>
                   <td className="hide-sm"><Sparkline series={g.r} w={150} h={26} /></td>
-                  <td className="r"><span className="rs-pill" style={rsPillStyle(g.pct, theme === 'dark')}>{Math.round(g.pct * 100)}%</span></td>
+                  <td className="r"><span className="rsbar"><span className="rsbar-t hide-sm"><span style={{ width: `${Math.max(3, g.pct * 100)}%`, background: g.pct >= 0.5 ? 'linear-gradient(90deg, var(--pos-2), var(--pos))' : 'linear-gradient(90deg, var(--surface-3), var(--text-3))' }} /></span>
+                    <span className="rs-pill" style={rsPillStyle(g.pct, theme === 'dark')}>{Math.round(g.pct * 100)}%</span></span></td>
                   <td className="r hide-sm">{g.dp != null ? <span className={`delta ${g.dp >= 0 ? 'up' : 'dn'}`}>{g.dp >= 0 ? '+' : ''}{g.dp.toFixed(0)}</span> : <span className="muted">—</span>}</td>
                 </tr>
                 {isOpen && <MemberRows g={g} members={members} selected={selected} setSel={setSel} />}

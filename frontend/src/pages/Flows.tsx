@@ -3,7 +3,7 @@ import { useFlows } from '../api/client';
 import { crore, dayLabel, fmtDate, MON, monLabel, num0 } from '../lib/format';
 import { FLOW_RANGES, flowRows, type FlowView } from '../lib/market';
 import { PairBars } from '../components/charts';
-import { Card, Empty, ErrorBox, Loading, Segmented } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader, Segmented } from '../components/ui';
 
 const cell = (v: number) => <span className={v >= 0 ? 'pos' : 'neg'}>{v >= 0 ? '+' : '−'}{Math.abs(v).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>;
 
@@ -42,6 +42,7 @@ export function FlowsPage() {
     ? `NSE provisional cash market, ₹ crore · ${fmtDate(rows[0].k)} – ${fmtDate(last.k)} · ${rows.length} sessions`
     : `NSE provisional cash market, ₹ crore · ${monLabel(rows[0].k)} – ${monLabel(last.k)}${running ? ` (to ${fmtDate(last.to)})` : ''}`;
   return <>
+    <PageHeader title="FII / DII flows" sub="Foreign and domestic institutional net buying in the cash market — NSE provisional figures, ₹ crore." />
     <Card title={`FII / DII cash flows · ${daily ? 'daily' : 'monthly'} net`} sub={sub}
       tools={<>
         {days.length > 0 && <Segmented label="View" testid="flow-view" value={v} onChange={setView}

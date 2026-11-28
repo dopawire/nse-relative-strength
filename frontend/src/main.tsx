@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import { initialTheme } from './components/AppContext';
+import '@fontsource-variable/inter';
 import './styles/app.css';
 
 // theme before first paint (no flash)

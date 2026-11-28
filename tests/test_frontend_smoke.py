@@ -177,9 +177,9 @@ def test_swing_lists_and_tradingview_exports(server, browser):
         allt = open(dl.value.path()).read()
         assert allt.startswith("###Breakout watch,") and want in allt
     if D.get("htf"):
-        heads = [h.inner_text() for h in page.query_selector_all("[data-testid=tbl-htf] th")]
-        for h in ("Pole", "Flag", "Pivot", "vs pivot", "Early trigger", "Flag vol"):
-            assert h in heads
+        heads = [h.inner_text().lower() for h in page.query_selector_all("[data-testid=tbl-htf] th")]
+        for h in ("pole", "flag", "pivot", "vs pivot", "early trigger", "flag vol"):
+            assert h in heads                                     # (headers are CSS-uppercased)
     page.locator("[data-testid=tbl-breakouts] tbody tr").first.click()        # stock chart
     page.wait_for_selector("[data-testid=stock-chart] svg path")
     page.keyboard.press("Escape")

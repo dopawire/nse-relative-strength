@@ -4,7 +4,7 @@ import type { GroupRow } from '../api/types';
 import { CAP_LABEL, fmtDate, pctTxt, sgn } from '../lib/format';
 import { stockIndex } from '../lib/market';
 import { QUAD_TIP, REGIME } from '../lib/decide';
-import { Card, Empty, ErrorBox, Loading, StockLink } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader, StockLink } from '../components/ui';
 import { FocusTrack } from './Track';
 
 export const QuadTag = ({ q }: { q: string }) => <span className={`tag quad-${q}`} title={QUAD_TIP[q]}>{q}</span>;
@@ -35,7 +35,7 @@ export function Focus() {
     </div>
   );
   return <>
-    <p className="page-intro">One answer from relative strength, momentum, participation and breadth — as of the {fmtDate(D.asof)} close.</p>
+    <PageHeader title="Where to focus" sub={<>One answer from relative strength, momentum, participation and breadth — as of the {fmtDate(D.asof)} close.</>} />
     <div className="answer" data-testid="focus-answer">
       <span className={`dot ${reg.level}`} />
       <div>

@@ -7,7 +7,7 @@ import { stockIndex } from '../lib/market';
 import { useApp } from './AppContext';
 import {
   IconBolt, IconFlow, IconHome, IconLayers, IconLogout, IconMenu, IconMoon, IconPulse, IconRefresh, IconRotate,
-  IconScan, IconSearch, IconSpark, IconSun, IconTarget, IconUser, Logo,
+  IconScan, IconSearch, IconSpark, IconSun, IconTarget, Logo,
 } from './Icons';
 import { StockModal } from './StockModal';
 
@@ -20,11 +20,19 @@ const NAV = [
     { to: '/flows', label: 'FII / DII', icon: IconFlow }, { to: '/scans', label: 'Scans', icon: IconScan }] },
 ];
 
-const TITLES: [RegExp, string][] = [
-  [/^\/$/, 'Overview'], [/^\/focus/, 'Where to focus'], [/^\/swing/, 'Swing setups'], [/^\/rankings/, 'Relative strength rankings'],
-  [/^\/listings/, 'New listings'], [/^\/breadth/, 'Market breadth'], [/^\/rotation/, 'Sector rotation'],
-  [/^\/flows/, 'FII / DII flows'], [/^\/scans/, 'Scans'],
+const TITLES: [RegExp, string, string][] = [
+  [/^\/$/, 'Overview', 'Dashboard'], [/^\/focus/, 'Where to focus', 'Decide'], [/^\/swing/, 'Swing setups', 'Decide'],
+  [/^\/rankings/, 'Relative strength', 'Rankings'], [/^\/listings/, 'New listings', 'Rankings'], [/^\/breadth/, 'Market breadth', 'Market'],
+  [/^\/rotation/, 'Sector rotation', 'Market'], [/^\/flows/, 'FII / DII flows', 'Market'], [/^\/scans/, 'Scans', 'Market'],
 ];
+
+/** NSE cash session: Mon–Fri 09:15–15:30 IST (holidays aside) */
+function marketStatus(now = new Date()) {
+  const ist = new Date(now.getTime() + (now.getTimezoneOffset() + 330) * 60000);
+  const mins = ist.getHours() * 60 + ist.getMinutes(), wd = ist.getDay();
+  const open = wd >= 1 && wd <= 5 && mins >= 555 && mins < 930;
+  return { open, label: open ? 'Market open' : 'Market closed', clock: ist.toTimeString().slice(0, 5) };
+}
 const REGIME_WORD = { on: 'Risk-on', mixed: 'Mixed', off: 'Risk-off' } as const;
 
 function StockSearch() {
@@ -60,7 +68,8 @@ function StockSearch() {
   return (
     <div className="search" ref={box}>
       <IconSearch />
-      <input className="input" placeholder="Search stocks…  ( / )" value={q} aria-label="Search stocks" data-testid="stock-search"
+      <kbd>/</kbd>
+      <input className="input" placeholder="Search 2,500+ stocks…" value={q} aria-label="Search stocks" data-testid="stock-search"
         onChange={e => { setQ(e.target.value); setOpen(true); setAct(0); }} onFocus={() => setOpen(true)}
         onKeyDown={e => {
           if (e.key === 'ArrowDown') { e.preventDefault(); setAct(a => Math.min(hits.length - 1, a + 1)); }
@@ -110,11 +119,11 @@ function UserMenu() {
   };
   return (
     <div className="dropdown" ref={box}>
-      <button className="btn" onClick={() => setOpen(o => !o)} aria-haspopup="menu" data-testid="user-menu">
-        {running ? <><IconRefresh className="spin" />{running}</> : <><IconUser /><span className="hide-sm">{me.user}</span></>}
+      <button className="btn user-btn" onClick={() => setOpen(o => !o)} aria-haspopup="menu" data-testid="user-menu">
+        {running ? <><IconRefresh className="spin" />{running}</> : <><span className="avatar">{me.user.slice(0, 1)}</span><span className="hide-sm">{me.user}</span></>}
       </button>
       {open && <div className="dropdown-menu" role="menu">
-        <div className="mh"><b>{me.user}</b>{me.role === 'admin' ? 'Administrator' : 'Viewer'}{!me.auth && ' · login off (local)'}</div>
+        <div className="mh"><span className="avatar">{me.user.slice(0, 1)}</span><div><b>{me.user}</b>{me.role === 'admin' ? 'Administrator' : 'Viewer'}{!me.auth && ' · login off (local)'}</div></div>
         {me.can.update_prices && <button className="mi" disabled={!!running} onClick={() => run('prices')}><IconRefresh />Update prices now</button>}
         {me.can.refresh_stocks && <button className="mi" disabled={!!running} onClick={() => run('stocks')}><IconSpark />Refresh new listings</button>}
         {me.auth && <button className="mi" data-testid="logout" onClick={async () => {
@@ -148,7 +157,10 @@ export function Layout() {
     }, 75);
     return () => window.clearInterval(t);
   }, [loc.pathname, loc.hash]);
-  const title = TITLES.find(([re]) => re.test(loc.pathname))?.[1] ?? '';
+  const hit = TITLES.find(([re]) => re.test(loc.pathname));
+  const title = hit?.[1] ?? '', section = hit?.[2] ?? '';
+  const [mkt, setMkt] = useState(marketStatus);
+  useEffect(() => { const t = window.setInterval(() => setMkt(marketStatus()), 30000); return () => window.clearInterval(t); }, []);
   const asof = decide?.asof || meta?.drange.split('→').pop()?.trim();
   const reg = decide?.regime;
   useEffect(() => { document.title = title ? `${title} · NSE RS` : 'NSE Relative Strength'; }, [title]);
@@ -171,18 +183,22 @@ export function Layout() {
           </NavLink>)}
         </div>)}
         <div className="side-foot">
-          {meta && <>Data <b>{fmtDate(asof)}</b> close<br />built {meta.generated} IST<br />{meta.n_window.toLocaleString('en-IN')} stocks ranked</>}
-          <div style={{ marginTop: 8 }}>Not investment advice.</div>
+          <div className="market-box" data-testid="market-box">
+            <div className="mb-h"><span className={`live ${mkt.open ? 'open' : ''}`} />{mkt.label}<span className="muted" style={{ marginLeft: 'auto', fontWeight: 500 }}>{mkt.clock} IST</span></div>
+            {meta && <>Data <b>{fmtDate(asof)}</b> close<br />Built {meta.generated} · {meta.n_window.toLocaleString('en-IN')} ranked</>}
+            {mkt.open && <div style={{ marginTop: 6, color: 'var(--text-3)' }}>Today's numbers arrive after 15:30.</div>}
+          </div>
+          <div className="disclaimer">For research only — not investment advice.</div>
         </div>
       </aside>
       <div className="main">
         <header className="topbar">
           <button className="btn icon ghost menu-btn" onClick={() => setNavOpen(o => !o)} aria-label="Menu"><IconMenu /></button>
-          <h1>{title}</h1>
-          {reg && <span className="tag plain hide-sm" title={`${reg.pass} of ${reg.known} regime checks pass`} data-testid="regime-chip">
-            <span className={`dot ${reg.level}`} style={{ marginRight: 8, width: 7, height: 7, boxShadow: 'none' }} />{REGIME_WORD[reg.level]}
+          <div className="crumb"><small>{section}</small><h1>{title}</h1></div>
+          {reg && <span className="regime-pill hide-sm" title={`${reg.pass} of ${reg.known} regime checks pass`} data-testid="regime-chip">
+            <span className={`dot ${reg.level}`} />{REGIME_WORD[reg.level]} <span className="muted" style={{ fontWeight: 500 }}>{reg.pass}/{reg.known}</span>
           </span>}
-          {asof && <span className="tag outline hide-sm" title="data covers completed sessions only">{fmtDate(asof)} close</span>}
+          {asof && <span className="tag outline hide-sm" style={{ height: 30, borderRadius: 99, padding: '0 12px' }} title="data covers completed sessions only">{fmtDate(asof)} close</span>}
           <div className="spacer" />
           <StockSearch />
           <button className="btn icon" onClick={toggleTheme} aria-label="Toggle theme" data-testid="theme-toggle">

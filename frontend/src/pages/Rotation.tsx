@@ -3,7 +3,7 @@ import { useRotation } from '../api/client';
 import { fmtDate } from '../lib/format';
 import { rebase, ROT_RANGES, rotStartIndex } from '../lib/market';
 import { LineChart } from '../components/charts';
-import { Card, Empty, ErrorBox, Loading, Segmented } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader, Segmented } from '../components/ui';
 
 export function RotationPage() {
   const rq = useRotation();
@@ -19,10 +19,8 @@ export function RotationPage() {
     return { name: g.name, rs, total: (rs[rs.length - 1] / rs[0] - 1) * 100 };
   }).sort((a, b) => b.total - a.total);
   return <>
-    <div className="sec-h" style={{ marginBottom: 14 }}>
-      <p className="page-intro" style={{ margin: 0 }}>Chain-linked equal-weight sector index ÷ NIFTY 500, rebased to 1.0 on {fmtDate(dates[0])} · {dates.length - 1} sessions to {fmtDate(dates[dates.length - 1])} · strongest first.</p>
-      <Segmented label="Period" testid="rot-range" value={range} onChange={setRange} options={Object.keys(ROT_RANGES).map(k => ({ value: k, label: k }))} />
-    </div>
+    <PageHeader title="Sector rotation" sub={<>Equal-weight sector index ÷ NIFTY 500, rebased to 1.0 on {fmtDate(dates[0])} · {dates.length - 1} sessions to {fmtDate(dates[dates.length - 1])} · strongest first.</>}
+      actions={<Segmented label="Period" testid="rot-range" value={range} onChange={setRange} options={Object.keys(ROT_RANGES).map(k => ({ value: k, label: k }))} />} />
     <div className="mini-grid" data-testid="rotation-grid">{rows.map(r => (
       <Card key={r.name} className="mini">
         <div className="mini-h" style={{ marginTop: -6 }}><span className="mini-n">{r.name}</span>

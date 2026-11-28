@@ -35,7 +35,7 @@ export function Segmented<T extends string>({ options, value, onChange, label, t
   );
 }
 
-export const Loading = ({ what = 'Loading' }: { what?: string }) => <div className="loading">{what}</div>;
+export const Loading = ({ what }: { what?: string }) => what ? <div className="loading">{what}</div> : <PageSkeleton />;
 export const ErrorBox = ({ error }: { error: unknown }) =>
   <div className="error">Couldn't load this: {error instanceof Error ? error.message : String(error)}</div>;
 export const Empty = ({ children }: { children: ReactNode }) => <div className="empty">{children}</div>;
@@ -79,4 +79,81 @@ export function rsPillStyle(pct: number, dark: boolean) {
   }
   const r = Math.round(255 + (34 - 255) * p), g = Math.round(255 + (160 - 255) * p), b = Math.round(255 + (96 - 255) * p);
   return { background: `rgb(${r},${g},${b})`, color: p > 0.55 ? '#fff' : '#0b3d24', boxShadow: 'inset 0 0 0 1px rgba(15,23,38,.06)' };
+}
+
+// ---------------------------------------------------------------- v2 building blocks
+
+/** page title + subtitle + actions */
+export function PageHeader({ title, sub, actions }: { title: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
+  return (
+    <div className="ph">
+      <div><h2 className="ph-t">{title}</h2>{sub && <div className="ph-s">{sub}</div>}</div>
+      {actions && <div className="ph-a">{actions}</div>}
+    </div>
+  );
+}
+
+/** KPI card: icon chip, label, big value, footnote, optional chart */
+export function Kpi({ icon, tone = 'accent', label, value, valueTone, sub, chart, testid }: {
+  icon: ReactNode; tone?: 'accent' | 'pos' | 'neg' | 'warn' | 'info' | 'violet'; label: string; value: ReactNode;
+  valueTone?: 'pos' | 'neg' | 'r-on' | 'r-mixed' | 'r-off'; sub?: ReactNode; chart?: ReactNode; testid?: string;
+}) {
+  return (
+    <div className="card kpi" data-testid={testid}>
+      <div className="stat-l kpi-top"><span className={`kpi-ic ${tone}`}>{icon}</span>{label}</div>
+      <div className={`stat-v ${valueTone ?? ''}`}>{value}</div>
+      {sub && <div className="stat-s">{sub}</div>}
+      {chart && <div className="kpi-spark">{chart}</div>}
+    </div>
+  );
+}
+
+/** RS rating 1-99 as a tinted badge */
+export function RsBadge({ v }: { v: number | null | undefined }) {
+  if (v == null) return <span className="muted">—</span>;
+  const cls = v >= 95 ? 'r1' : v >= 85 ? 'r2' : v >= 70 ? 'r3' : 'r4';
+  return <span className={`rr ${cls}`} title="RS rating 1-99 vs all stocks">{v}</span>;
+}
+
+/** a stable colour per symbol (for the little avatar squares) */
+export function symColor(s: string) {
+  let h = 0;
+  for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `linear-gradient(135deg, hsl(${h} 62% 52%), hsl(${(h + 40) % 360} 58% 40%))`;
+}
+
+/** avatar + name + symbol line */
+export function StockCell({ name, sym, extra }: { name: string; sym: string; extra?: ReactNode }) {
+  return (
+    <div className="stk">
+      <span className="stk-av" style={{ background: symColor(sym) }} aria-hidden="true">{sym.replace(/[^A-Z0-9]/gi, '').slice(0, 2)}</span>
+      <div style={{ minWidth: 0 }}><span className="stk-name">{name}</span><span className="stk-sym">{sym}{extra}</span></div>
+    </div>
+  );
+}
+
+export function Tabs<T extends string>({ tabs, value, onChange, testid }: {
+  tabs: { value: T; label: string; n?: number }[]; value: T; onChange: (v: T) => void; testid?: string;
+}) {
+  return (
+    <div className="tabs" role="tablist" data-testid={testid}>
+      {tabs.map(t => <button key={t.value} role="tab" aria-selected={t.value === value} className={t.value === value ? 'on' : ''}
+        onClick={() => onChange(t.value)}>{t.label}{t.n != null && <span className="n">{t.n}</span>}</button>)}
+    </div>
+  );
+}
+
+/** shimmering placeholders while data loads */
+export function Skeleton({ h = 16, w = '100%', style }: { h?: number | string; w?: number | string; style?: React.CSSProperties }) {
+  return <div className="skel" style={{ height: h, width: w, maxWidth: '100%', ...style }} />;
+}
+export function PageSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading">
+      <Skeleton h={30} w={280} style={{ marginBottom: 10 }} /><Skeleton h={14} w={460} style={{ marginBottom: 24 }} />
+      <div className="grid four">{[0, 1, 2, 3].map(i => <Skeleton key={i} h={128} />)}</div>
+      <Skeleton h={260} style={{ marginTop: 18 }} />
+      <div className="grid two" style={{ marginTop: 18 }}><Skeleton h={220} /><Skeleton h={220} /></div>
+    </div>
+  );
 }

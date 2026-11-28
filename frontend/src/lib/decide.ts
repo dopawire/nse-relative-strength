@@ -4,11 +4,14 @@
 
 export const REGIME = {
   on: { word: 'Risk-on', line: 'trend and breadth agree — normal size, act on breakouts in the leading groups.',
-    size: 'Exposure 75–100% · risk ~1% of capital per trade · 4–6 positions' },
+    size: 'Exposure 75–100% · risk ~1% of capital per trade · 4–6 positions',
+    sizing: [['Exposure', '75–100%'], ['Risk per trade', '~1%'], ['Positions', '4–6']] },
   mixed: { word: 'Mixed', line: 'signals disagree — be selective: half size, only the best setups in leading groups, book profits sooner.',
-    size: 'Exposure 25–50% · risk ~0.5% per trade · 2–3 positions' },
+    size: 'Exposure 25–50% · risk ~0.5% per trade · 2–3 positions',
+    sizing: [['Exposure', '25–50%'], ['Risk per trade', '~0.5%'], ['Positions', '2–3']] },
   off: { word: 'Risk-off', line: 'trend and breadth are weak — protect capital: mostly cash, small pilot positions only.',
-    size: 'Exposure 0–20% · risk ≤0.5% per trade · pilots only' },
+    size: 'Exposure 0–20% · risk ≤0.5% per trade · pilots only',
+    sizing: [['Exposure', '0–20%'], ['Risk per trade', '≤0.5%'], ['Positions', 'pilots only']] },
 } as const;
 
 export const QUAD_TIP: Record<string, string> = {

@@ -1,26 +1,51 @@
-import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAllLevels, useBreadth, useDecide, useFlows, useMeta, useTrack } from '../api/client';
-import { CAP_LABEL, crore, fmtDate, fmtPrice, shortName } from '../lib/format';
+import type { GroupRow } from '../api/types';
+import { CAP_LABEL, crore, fmtDate, fmtPrice, sgn, shortName } from '../lib/format';
 import { stockIndex, type Stock } from '../lib/market';
-import { REGIME } from '../lib/decide';
+import { QUAD_TIP, REGIME } from '../lib/decide';
 import { useApp } from '../components/AppContext';
-import { Oscillator } from '../components/charts';
-import { Card, ErrorBox, Loading, Stat, Tone } from '../components/ui';
+import { AreaSpark, Gauge, MiniBars, Oscillator } from '../components/charts';
+import { IconFlow, IconLayers, IconPulse, IconTarget } from '../components/Icons';
+import { Card, ErrorBox, Kpi, Loading, PageHeader, RsBadge, StockCell, Tabs, Tone } from '../components/ui';
 
-function MiniList({ title, to, syms, byS, render }: {
-  title: string; to: string; syms: string[]; byS: Map<string, Stock>; render: (m: Stock) => React.ReactNode;
-}) {
+type SetupKey = 'breakouts' | 'pullbacks' | 'htf' | 'weekly' | 'ipos';
+const SETUPS: { key: SetupKey; label: string; anchor: string }[] = [
+  { key: 'breakouts', label: 'Breakouts', anchor: 'list-breakouts' }, { key: 'htf', label: 'High tight flags', anchor: 'list-htf' },
+  { key: 'weekly', label: 'Weekly trend', anchor: 'list-weekly' }, { key: 'pullbacks', label: 'Pullbacks', anchor: 'list-pullbacks' },
+  { key: 'ipos', label: 'IPO bases', anchor: 'list-ipos' },
+];
+
+/** sector tile colour from its 1-month return vs the average stock */
+function heatStyle(rel: number | null): React.CSSProperties {
+  const v = Math.max(-1, Math.min(1, (rel ?? 0) / 8));
+  const a = 0.12 + Math.abs(v) * 0.6;
+  return v >= 0
+    ? { background: `linear-gradient(160deg, rgba(46,212,122,${a}), rgba(46,212,122,${a * 0.55}))`, borderColor: `rgba(46,212,122,${a * 0.6})` }
+    : { background: `linear-gradient(160deg, rgba(255,93,108,${a}), rgba(255,93,108,${a * 0.55}))`, borderColor: `rgba(255,93,108,${a * 0.6})` };
+}
+
+function SetupList({ syms, byS, keyName }: { syms: string[]; byS: Map<string, Stock>; keyName: SetupKey }) {
   const { openStock } = useApp();
-  const list = syms.slice(0, 5).map(s => byS.get(s)).filter((m): m is Stock => !!m);
+  const list = syms.slice(0, 8).map(s => byS.get(s)).filter((m): m is Stock => !!m);
+  if (!list.length) return <div className="empty" style={{ padding: 36 }}>Nothing passes this screen today.</div>;
+  const metric = (m: Stock): ReactNode => {
+    if (keyName === 'htf' && m.htf) return m.htf.bo != null
+      ? <><span className="pos">broke out</span><span className="sub2">pivot {fmtPrice(m.htf.p)}</span></>
+      : <>{(-m.htf.dist).toFixed(1)}% below<span className="sub2">pivot {fmtPrice(m.htf.p)}</span></>;
+    if (keyName === 'weekly' && m.wk) return <><Tone v={m.wk.d} /><span className="sub2">vs 10W SMA</span></>;
+    if (keyName === 'ipos' && m.ipo) return <><Tone v={m.ipo.g} dp={0} /><span className="sub2">vs issue</span></>;
+    return <>{m.h == null ? '—' : `${m.h.toFixed(1)}%`}<span className="sub2">off high</span></>;
+  };
   return (
-    <Card title={title} count={syms.length} tools={<Link className="btn sm ghost" to={to}>All →</Link>} flush>
-      {list.length ? <table className="tbl"><tbody>{list.map(m => (
-        <tr key={m.s} className="clickable" onClick={() => openStock(m.s)}>
-          <td><span className="stk-name">{shortName(m.n)}</span><span className="stk-sym">{m.s}</span></td>
-          <td className="r tnum">{render(m)}</td>
-        </tr>))}</tbody></table> : <div className="empty" style={{ padding: 24 }}>None today</div>}
-    </Card>
+    <div className="tbl-wrap"><table className="tbl"><tbody>{list.map(m => (
+      <tr key={m.s} className="clickable" onClick={() => openStock(m.s)}>
+        <td><StockCell name={shortName(m.n)} sym={m.s} /></td>
+        <td className="r nowrap">{fmtPrice(m.l)}<span className="sub2"><Tone v={m.w1} /> 1W</span></td>
+        <td className="r nowrap">{metric(m)}</td>
+        <td className="r"><RsBadge v={m.rr} /></td>
+      </tr>))}</tbody></table></div>
   );
 }
 
@@ -31,57 +56,119 @@ export function Overview() {
   const flows = useFlows().data;
   const track = useTrack().data;
   const { levels } = useAllLevels();
-  const byS = useMemo(() => new Map((levels ? stockIndex(levels) : []).map(m => [m.s, m])), [levels]);
+  const nav = useNavigate();
+  const [tab, setTab] = useState<SetupKey>('breakouts');
+  const all = useMemo(() => (levels ? stockIndex(levels) : []), [levels]);
+  const byS = useMemo(() => new Map(all.map(m => [m.s, m])), [all]);
   if (dq.error) return <ErrorBox error={dq.error} />;
   if (!dq.data || !meta) return <Loading />;
   const D = dq.data, reg = D.regime, R = REGIME[reg.level];
   const month = flows?.months[flows.months.length - 1];
+  const monthDays = flows && month ? flows.days.filter(d => d.d.slice(0, 7) === month.m).map(d => d.fii) : [];
   const s20 = track?.summary?.['20'];
-  const tail = breadth ? Math.min(breadth.osc.length, 130) : 0;
   const capTop = D.caps.find(r => r.name === D.cap);
+  const withD1 = all.filter(m => m.d1 != null);
+  const up = withD1.filter(m => (m.d1 ?? 0) > 0).length, down = withD1.filter(m => (m.d1 ?? 0) < 0).length;
+  const leaders = all.filter(m => (m.rr ?? 0) >= 80 && m.e[1] === 1).length;
+  const sectors = [...D.sectors].sort((a, b) => (b.rel1 ?? -99) - (a.rel1 ?? -99));
+  const tail = breadth ? Math.min(breadth.osc.length, 130) : 0;
+  const listOf = (k: SetupKey) => (D[k] ?? []) as string[];
+  const screens: [keyof NonNullable<typeof s20>, string][] = [
+    ['brk', 'Breakout watch'], ['pb', 'Pullbacks'], ['ipo', 'IPO bases'], ['wkl', 'Weekly trend'], ['htf', 'High tight flags']];
+  const maxEx = Math.max(0.01, ...screens.map(([k]) => Math.abs(((s20?.[k] as { ex?: number } | null)?.ex) ?? 0)));
+  const focusNames = D.focus;
+
   return <>
-    <div className="grid four">
-      <Stat testid="stat-regime" label="Market regime" value={<span className={`r-${reg.level}`}>{R.word}</span>} sub={`${reg.pass} of ${reg.known} checks pass · ${R.size.split(' · ')[0]}`} />
-      <Stat testid="stat-breadth" label="Breadth oscillator" value={breadth ? `${breadth.latest >= 0 ? '+' : ''}${breadth.latest.toFixed(1)}` : '—'}
-        tone={breadth ? (breadth.latest >= 0 ? 'pos' : 'neg') : undefined} sub={breadth ? `${breadth.n.toLocaleString('en-IN')} stocks · ±40 = extremes` : ''} />
-      <Stat testid="stat-fii" label="FII net this month" value={month ? crore(month.fii) : '—'} tone={month ? (month.fii >= 0 ? 'pos' : 'neg') : undefined}
-        sub={month ? <>DII {crore(month.dii)}{month.to ? ` · to ${fmtDate(month.to)}` : ''}</> : ''} />
-      <Stat testid="stat-stocks" label="Stocks ranked" value={meta.n_window.toLocaleString('en-IN')}
-        sub={`${(meta.n_stocks - meta.n_window).toLocaleString('en-IN')} left out today${meta.illiquid.length ? ` (${meta.illiquid.length} thinly traded)` : ''}`} />
-    </div>
+    <PageHeader title="Market overview" sub={<>Everything that matters for the next session — from the {fmtDate(D.asof)} close.</>}
+      actions={<><Link className="btn" to="/focus"><IconTarget />Focus</Link><Link className="btn primary" to="/swing">Swing setups →</Link></>} />
 
-    <div className="answer" style={{ marginTop: 16 }} data-testid="overview-answer">
-      <span className={`dot ${reg.level}`} />
-      <div style={{ flex: 1 }}>
-        <div className="answer-t">Focus on {D.focus.map((n, i) => <span key={n}>{i > 0 && (i === D.focus.length - 1 ? (D.focus.length > 2 ? ', and ' : ' and ') : ', ')}<b>{n}</b></span>)}
-          {capTop && <>, in <b>{(CAP_LABEL[capTop.name] ?? capTop.name).toLowerCase()}s</b></>}.</div>
-        <div className="answer-s">{R.line.charAt(0).toUpperCase() + R.line.slice(1)}{D.turning.length > 0 && <> Turning up: {D.turning.join(', ')}.</>}</div>
+    <section className="card hero" data-testid="stat-regime">
+      <div className={`hero-bar ${reg.level}`} />
+      <div className="hero-in">
+        <Gauge pass={reg.pass} total={reg.known} level={reg.level} />
+        <div>
+          <div className="hero-k">Today's call · market <span className={`r-${reg.level}`}>{R.word}</span></div>
+          <div className="hero-t" data-testid="overview-answer">Focus on {focusNames.map((n, i) => <span key={n}>{i > 0 && (i === focusNames.length - 1 ? (focusNames.length > 2 ? ', and ' : ' and ') : ', ')}<b>{n}</b></span>)}
+            {capTop && <>, in <b>{(CAP_LABEL[capTop.name] ?? capTop.name).toLowerCase()}s</b></>}.</div>
+          <div className="hero-s">{R.line.charAt(0).toUpperCase() + R.line.slice(1)}</div>
+          <div className="pills">
+            {focusNames.map(n => <span key={n} className="pill"><span className="tri">▲</span>{n}</span>)}
+            {capTop && <span className="pill cap">{CAP_LABEL[capTop.name] ?? capTop.name}</span>}
+            {D.turning.map(n => <span key={n} className="pill" title="turning up — early"><span className="tri" style={{ color: 'var(--info)' }}>↗</span>{n}</span>)}
+          </div>
+        </div>
+        <div className="hero-side">
+          {R.sizing.map(([k, v]) => <div className="hs" key={k}><span>{k}</span><b>{v}</b></div>)}
+        </div>
       </div>
-      <Link className="btn sm" to="/focus">Details</Link>
+    </section>
+
+    <div className="grid four" style={{ marginTop: 18 }}>
+      <Kpi testid="stat-breadth" icon={<IconPulse />} tone={breadth && breadth.latest >= 0 ? 'pos' : 'neg'} label="Breadth oscillator"
+        value={breadth ? `${breadth.latest >= 0 ? '+' : ''}${breadth.latest.toFixed(1)}` : '—'} valueTone={breadth ? (breadth.latest >= 0 ? 'pos' : 'neg') : undefined}
+        sub={breadth ? `${breadth.n.toLocaleString('en-IN')} stocks · ±40 marks extremes` : ''}
+        chart={breadth ? <AreaSpark values={breadth.osc.slice(-60)} zero /> : null} />
+      <Kpi testid="stat-fii" icon={<IconFlow />} tone="info" label="FII net this month"
+        value={month ? crore(month.fii) : '—'} valueTone={month ? (month.fii >= 0 ? 'pos' : 'neg') : undefined}
+        sub={month ? <>DII {crore(month.dii)}{month.to ? ` · to ${fmtDate(month.to)}` : ''}</> : ''}
+        chart={monthDays.length ? <MiniBars values={monthDays} /> : null} />
+      <Kpi icon={<IconTarget />} tone="violet" label="Participation today"
+        value={withD1.length ? `${Math.round((up / withD1.length) * 100)}%` : '—'}
+        sub={<><span className="pos">{up.toLocaleString('en-IN')} up</span> · <span className="neg">{down.toLocaleString('en-IN')} down</span> · {leaders} RS-80 leaders in uptrends</>}
+        chart={withD1.length ? <div className="hbar-track" style={{ marginTop: 14, height: 8 }}>
+          <div className="hbar-fill" style={{ left: 0, width: `${(up / withD1.length) * 100}%`, background: 'var(--pos)' }} />
+          <div className="hbar-fill" style={{ right: 0, width: `${(down / withD1.length) * 100}%`, background: 'var(--neg)', opacity: .8 }} /></div> : null} />
+      <Kpi testid="stat-stocks" icon={<IconLayers />} label="Stocks ranked" value={meta.n_window.toLocaleString('en-IN')}
+        sub={`${(meta.n_stocks - meta.n_window).toLocaleString('en-IN')} left out today${meta.illiquid.length ? ` (${meta.illiquid.length} thinly traded)` : ''} · ${meta.ipo.length} new listings`}
+        chart={<div className="hbar-track" style={{ marginTop: 14, height: 8 }}>
+          <div className="hbar-fill" style={{ left: 0, width: `${(meta.n_window / meta.n_stocks) * 100}%`, background: 'var(--accent-grad)' }} /></div>} />
     </div>
 
-    <div className="grid three" style={{ marginTop: 16 }}>
-      <MiniList title="Breakout watch" to="/swing#list-breakouts" syms={D.breakouts} byS={byS}
-        render={m => <>RS <b>{m.rr ?? '—'}</b><span className="sub2">{m.h == null ? '' : `${m.h.toFixed(1)}% off high`}</span></>} />
-      <MiniList title="High tight flags" to="/swing#list-htf" syms={D.htf ?? []} byS={byS}
-        render={m => m.htf ? (m.htf.bo != null ? <>broke out<span className="sub2">pivot {fmtPrice(m.htf.p)}</span></>
-          : <>{(-m.htf.dist).toFixed(1)}% below<span className="sub2">pivot {fmtPrice(m.htf.p)}</span></>) : null} />
-      <MiniList title="Weekly trend" to="/swing#list-weekly" syms={D.weekly ?? []} byS={byS}
-        render={m => <>RS <b>{m.rr ?? '—'}</b><span className="sub2">{m.wk ? <Tone v={m.wk.d} /> : null} vs 10W</span></>} />
-    </div>
-
-    <div className="grid two" style={{ marginTop: 16 }}>
-      <Card title="Breadth, last 6 months" tools={<Link className="btn sm ghost" to="/breadth">Open →</Link>}>
-        {breadth && tail > 1 ? <Oscillator dates={breadth.dates.slice(-tail)} osc={breadth.osc.slice(-tail)} height={200} /> : <Loading />}
+    <div className="grid wide-l" style={{ marginTop: 18 }}>
+      <Card title="Sector heatmap" sub="1-month median return vs the average stock · click a sector for its rankings"
+        tools={<span className="heat-legend">weaker<i />stronger</span>}>
+        <div className="heat" data-testid="sector-heatmap">
+          {sectors.map((r: GroupRow) => (
+            <button key={r.name} type="button" className="heat-t" style={heatStyle(r.rel1)} title={`${r.name} — ${QUAD_TIP[r.quad]}`}
+              onClick={() => nav('/rankings/sector', { state: { q: r.name } })}>
+              <span className="heat-n">{r.name}</span>
+              <span className="heat-v"><b>{sgn(r.rel1)}</b><span>{r.quad}</span></span>
+            </button>))}
+        </div>
       </Card>
-      <Card title="How the screens have done" sub="average excess return vs NIFTY 500 over the next 20 sessions" tools={<Link className="btn sm ghost" to="/swing">Track record →</Link>} flush>
-        {s20 ? <table className="tbl"><tbody>
-          {([['brk', 'Breakout watch'], ['pb', 'Pullbacks'], ['ipo', 'IPO bases'], ['wkl', 'Weekly trend'], ['htf', 'High tight flags']] as const).map(([k, label]) => {
-            const v = s20[k];
-            return <tr key={k}><td>{label}</td><td className="r tnum">{v ? <><Tone v={v.ex * 100} /><span className="hit">{(v.hit * 100).toFixed(0)}% beat N500</span></> : '—'}</td></tr>;
+      <Card title="Top setups" sub="tonight's best candidates · click one for its chart" flush
+        tools={<Link className="btn sm ghost" to={`/swing#${SETUPS.find(s => s.key === tab)!.anchor}`}>All →</Link>}>
+        <Tabs testid="setup-tabs" value={tab} onChange={setTab} tabs={SETUPS.map(s => ({ value: s.key, label: s.label, n: listOf(s.key).length }))} />
+        <SetupList syms={listOf(tab)} byS={byS} keyName={tab} />
+      </Card>
+    </div>
+
+    <div className="grid wide-l" style={{ marginTop: 18 }}>
+      <Card title="Market breadth" sub="last 6 months · green above zero, red below" tools={<Link className="btn sm ghost" to="/breadth">Open →</Link>}>
+        {breadth && tail > 1 ? <Oscillator dates={breadth.dates.slice(-tail)} osc={breadth.osc.slice(-tail)} height={230} /> : <Loading what="Loading" />}
+      </Card>
+      <Card title="How the screens have done" sub="vs NIFTY 500 · next 20 sessions" flush
+        tools={<Link className="btn sm ghost" to="/swing">Details →</Link>}>
+        {s20 ? <div style={{ paddingBottom: 6 }}>
+          {screens.map(([k, label]) => {
+            const v = s20[k] as { ex: number; hit: number } | null;
+            const w = v ? (Math.abs(v.ex) / maxEx) * 50 : 0;
+            return <div className="hbar" key={k}>
+              <span>{label}<span className="sub2">{v ? `${(v.hit * 100).toFixed(0)}% beat NIFTY 500` : 'no results yet'}</span></span>
+              <div className="hbar-track">
+                <div className="hbar-zero" style={{ left: '50%' }} />
+                {v && <div className="hbar-fill" style={{ [v.ex >= 0 ? 'left' : 'right']: '50%', width: `${w}%`, background: v.ex >= 0 ? 'var(--pos)' : 'var(--neg)' }} />}
+              </div>
+              <b className="r tnum" style={{ textAlign: 'right' }}>{v ? <Tone v={v.ex * 100} /> : '—'}</b>
+            </div>;
           })}
-          {s20.focus && <tr><td>Focus sectors vs the average stock</td><td className="r tnum"><Tone v={s20.focus.avg * 100} /><span className="hit">{(s20.focus.hit * 100).toFixed(0)}% of days ahead</span></td></tr>}
-        </tbody></table> : <div className="empty">No results yet.</div>}
+          {s20.focus && <div className="hbar">
+            <span>Focus sectors<span className="sub2">vs the average stock · {(s20.focus.hit * 100).toFixed(0)}% of days</span></span>
+            <div className="hbar-track"><div className="hbar-zero" style={{ left: '50%' }} />
+              <div className="hbar-fill" style={{ [s20.focus.avg >= 0 ? 'left' : 'right']: '50%', width: `${(Math.abs(s20.focus.avg) / maxEx) * 50}%`, background: 'var(--accent)' }} /></div>
+            <b style={{ textAlign: 'right' }}><Tone v={s20.focus.avg * 100} /></b>
+          </div>}
+        </div> : <div className="empty">No results yet.</div>}
       </Card>
     </div>
     <p className="foot">Data as of the {fmtDate(D.asof)} close (built {meta.generated} IST). Completed sessions only — today's numbers arrive with the evening build after 15:30. Not investment advice.</p>

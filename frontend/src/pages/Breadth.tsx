@@ -1,7 +1,7 @@
 import { useBreadth, useLevel, useMeta } from '../api/client';
 import { fmtDate } from '../lib/format';
 import { Oscillator } from '../components/charts';
-import { Card, Empty, ErrorBox, Loading } from '../components/ui';
+import { Card, Empty, ErrorBox, Loading, PageHeader } from '../components/ui';
 
 export function Breadth() {
   const bq = useBreadth();
@@ -16,7 +16,8 @@ export function Breadth() {
   const src = meta?.src ?? {};
   const srcDates = Object.keys(src).sort();
   return <>
-    <p className="page-intro">McClellan-style oscillator: 19- vs 39-day EMA of ratio-adjusted (advancers − decliners) across {b.n.toLocaleString('en-IN')} stocks · {b.span}.</p>
+    <PageHeader title="Market breadth" sub={<>McClellan-style oscillator: 19- vs 39-day EMA of ratio-adjusted (advancers − decliners) across {b.n.toLocaleString('en-IN')} stocks · {b.span}.</>}
+      actions={<span className={`tag lg ${b.latest >= 0 ? 'pos' : 'neg'}`}>Latest {b.latest >= 0 ? '+' : ''}{b.latest.toFixed(1)}</span>} />
     {div?.state && div.state !== 'none' && <div className={`banner ${div.state === 'bearish' ? 'bear' : 'bull'}`}>
       <b>{div.state === 'bearish' ? 'Bearish divergence' : 'Bullish divergence'}</b> — {div.note}</div>}
     <Card title="NSE market breadth oscillator" sub={<>Latest <b className={b.latest >= 0 ? 'pos' : 'neg'}>{b.latest >= 0 ? '+' : ''}{b.latest.toFixed(1)}</b> on {fmtDate(b.dates[b.dates.length - 1])} · ≈ −40 and below flags oversold / possible bottoms, ≈ +40 and above overbought — reversal warnings</>}>
