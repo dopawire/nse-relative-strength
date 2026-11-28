@@ -1,5 +1,11 @@
 """Shared test guards."""
+import os
+
 import pytest
+
+# The API is private by default; tests that exercise login switch it on
+# themselves (tests/test_auth.py).
+os.environ.setdefault("NSE_RS_AUTH", "0")
 
 import build_rs
 

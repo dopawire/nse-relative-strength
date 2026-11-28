@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests fastapi "uvicorn[standard]" pytest ruff httpx
+        run: pip install -r requirements-prod.txt pytest ruff httpx
 
       - name: Lint
         run: ruff check .
@@ -27,3 +27,26 @@ jobs:
 
       - name: Audit tool self-check
         run: python -c "import audit_data"   # import/syntax sanity (no caches in CI)
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build          # typecheck + production bundle
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the web image (the worker adds Chromium on top of the same base)
+        run: docker build --target web -t nse-rs:web .

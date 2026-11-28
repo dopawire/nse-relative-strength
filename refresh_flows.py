@@ -13,6 +13,7 @@ import requests
 
 from refresh_classification import NSE_UA
 from rs_engine import flows
+from rs_engine.config import data_path
 
 
 def fetch_kotak():
@@ -50,7 +51,7 @@ def fetch_archive():
     return {}
 
 
-RS_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rs_data.json")
+RS_DATA = data_path("rs_data.json")
 
 
 def patch_rs_data():

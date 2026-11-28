@@ -11,14 +11,18 @@ import os
 import shutil
 import sys
 
+from rs_engine.config import data_path
+
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "frontend", "dist")
+# the public static snapshot (GitHub Pages) keeps the pre-2.0 app, which
+# reads rs_data.json directly; the React app (frontend/dist) needs the API.
+SRC = os.path.join(HERE, "frontend", "legacy")
 
 
 def export(out_dir=None, src_dir=None):
     out = out_dir or os.path.join(HERE, "site")
     src = src_dir or SRC
-    data = os.path.join(HERE, "rs_data.json")
+    data = data_path("rs_data.json")
     if not os.path.exists(data):
         sys.exit("rs_data.json missing — run build_rs.py first")
     if os.path.isdir(out):

@@ -7,8 +7,10 @@ import datetime as dt
 import os
 import re
 
+from rs_engine.config import data_path
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EVENTS = os.path.join(ROOT, "nse_events.csv")
+EVENTS = data_path("nse_events.csv")
 NSE_URLS = ("https://www.nseindia.com/api/corporate-board-meetings"
             "?index=equities&from_date={a}&to_date={b}",
             "https://www.nseindia.com/api/event-calendar"

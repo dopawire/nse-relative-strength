@@ -1,0 +1,7 @@
+# Runtime dependencies of the server and the data pipeline (Docker image).
+# Pinned to the versions the test suite runs against.
+fastapi==0.162.0
+pydantic==2.14.2
+starlette==1.10.0
+uvicorn[standard]==0.54.0
+requests==2.34.2

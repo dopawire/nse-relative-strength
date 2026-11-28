@@ -2,20 +2,29 @@
 FastAPI backend for NSE Relative Strength.
 Reads precomputed rs_data.json at startup and serves it as a JSON API.
 Also serves the frontend static build.
+
+Private by default (backend/auth.py): every /api call except login and the
+health check needs a session cookie; the update / reload / watchlist-edit
+actions need an admin.  NSE_RS_AUTH=0 turns login off for local development.
 """
+import importlib.util
 import json
 import os
 import sys
 import subprocess
 import threading
+import time
 import datetime as dt
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
-from rs_engine.config import WINDOW, BENCHMARK_NAME
+from backend import auth
+
+from rs_engine.config import WINDOW, BENCHMARK_NAME, data_path
 from backend.models import (
     MetaResponse, LevelSummary, LevelResponse,
     GroupOut, BreadthResponse, RotationResponse, StockDetail, FlowsResponse, WatchlistIn,
@@ -23,24 +32,27 @@ from backend.models import (
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-DATA_PATH = os.path.join(ROOT, "rs_data.json")
+DATA_PATH = data_path("rs_data.json")
 STATIC_DIR = os.path.realpath(os.path.join(ROOT, "frontend", "dist"))
 
 # In-memory data — loaded at startup, replaced on /api/reload.
 # None means "not loaded yet" (startup in progress).
 _data: dict | None = None
 _group_index: dict[int, dict] = {}   # gid -> group dict for O(1) lookup
+_data_mtime = 0.0                    # rs_data.json mtime when it was loaded
+_mtime_checked = 0.0
 
 
 def _load_data_from_disk():
     """Load rs_data.json into memory.  Called at startup and on /api/reload."""
-    global _data, _group_index, _price_cache
+    global _data, _group_index, _price_cache, _data_mtime
     _price_cache = None          # per-stock charts re-read the fresh price cache
     if not os.path.exists(DATA_PATH):
         print(f"WARNING: {DATA_PATH} not found. Run build_rs.py first.")
         _data = {"meta": {}, "levels": [], "breadth": None}
         _group_index = {}
         return
+    _data_mtime = os.path.getmtime(DATA_PATH)
     with open(DATA_PATH) as f:
         _data = json.load(f)
     _group_index = {}
@@ -58,7 +70,126 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="NSE Relative Strength", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="NSE Relative Strength", version="2.0.0", lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
+
+PUBLIC_API = {"/api/auth/login", "/api/health"}
+ADMIN_API = {("POST", "/api/update-prices"), ("POST", "/api/refresh-stocks"),
+             ("POST", "/api/reload"), ("PUT", "/api/watchlist")}
+SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "same-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    "Content-Security-Policy": ("default-src 'self'; img-src 'self' data:; "
+                                "style-src 'self' 'unsafe-inline'; script-src 'self'; "
+                                "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
+                                "form-action 'self'"),
+}
+
+
+def _maybe_reload():
+    """The scheduler container rewrites rs_data.json on the shared volume:
+    pick the new file up (checked at most every 5 s)."""
+    global _mtime_checked
+    now = time.time()
+    if now - _mtime_checked < 5:
+        return
+    _mtime_checked = now
+    try:
+        if os.path.getmtime(DATA_PATH) > _data_mtime:
+            _load_data_from_disk()
+    except OSError:
+        pass
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    """Session check for /api, admin check for the write actions, a custom
+    header on state-changing calls (CSRF), security headers on everything."""
+    path, method = request.url.path, request.method
+    if path.startswith("/api/") and path not in PUBLIC_API:
+        if auth.enabled():
+            user = auth.read_token(request.cookies.get(auth.COOKIE, ""))
+            if user is None:
+                return JSONResponse({"detail": "login required"}, status_code=401,
+                                    headers=SECURITY_HEADERS)
+            if (method, path) in ADMIN_API and user["r"] != "admin":
+                return JSONResponse({"detail": "admin only"}, status_code=403,
+                                    headers=SECURITY_HEADERS)
+            request.state.user = user
+        else:
+            request.state.user = {"u": "local", "r": "admin"}
+    if path.startswith("/api/") and method not in ("GET", "HEAD", "OPTIONS") \
+            and request.headers.get("x-nse-rs") != "1":
+        return JSONResponse({"detail": "missing X-NSE-RS header"}, status_code=403,
+                            headers=SECURITY_HEADERS)
+    if path.startswith("/api/") and _data is not None:
+        _maybe_reload()
+    response = await call_next(request)
+    for k, v in SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    if path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+# ---- auth ----
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+def _client_ip(request: Request):
+    return request.client.host if request.client else "?"
+
+
+@app.post("/api/auth/login")
+def login(body: LoginIn, request: Request):
+    """Password login → HttpOnly session cookie (SameSite=Strict)."""
+    if not auth.enabled():
+        return {"user": "local", "role": "admin", "auth": False}
+    ip, name = _client_ip(request), body.username.strip()
+    keys = (f"ip:{ip}", f"user:{name.lower()}")
+    if auth.locked(*keys):
+        raise HTTPException(429, detail="too many failed logins — try again in 15 minutes")
+    user = auth.authenticate(name, body.password)
+    if user is None:
+        auth.record_failure(*keys)
+        raise HTTPException(401, detail="wrong username or password")
+    auth.clear_failures(*keys)
+    resp = JSONResponse({"user": name, "role": user["role"], "auth": True})
+    resp.set_cookie(auth.COOKIE, auth.make_token(name, user), max_age=auth.SESSION_DAYS * 86400,
+                    httponly=True, samesite="strict", path="/",
+                    secure=os.environ.get("NSE_RS_COOKIE_SECURE", "1") != "0")
+    return resp
+
+
+@app.post("/api/auth/logout")
+def logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/auth/me")
+def me(request: Request):
+    """Who is signed in, and what this server can do for them."""
+    u = request.state.user
+    admin = u["r"] == "admin"
+    return {"user": u["u"], "role": u["r"], "auth": auth.enabled(),
+            "can": {"update_prices": admin,
+                    "refresh_stocks": admin and importlib.util.find_spec("playwright") is not None,
+                    "edit_watchlist": admin}}
+
+
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+def health():
+    """Liveness + data freshness for the container healthcheck / monitoring."""
+    meta = (_data or {}).get("meta", {})
+    return {"ok": _data is not None, "generated": meta.get("gen"),
+            "asof": ((_data or {}).get("decide") or {}).get("asof")}
 
 
 # ---- API endpoints ----
@@ -110,6 +241,7 @@ def get_level(key: str):
                     name=g["name"],
                     n=g["n"],
                     pct=g["pct"],
+                    dp=g.get("dp"),
                     r=g["r"],
                     members=g.get("members", []),
                 ))
@@ -128,6 +260,7 @@ def get_group(gid: int):
         name=g["name"],
         n=g["n"],
         pct=g["pct"],
+        dp=g.get("dp"),
         r=g["r"],
         members=g.get("members", []),
     )
@@ -363,9 +496,22 @@ def pipeline_status():
 
 # ---- Serve frontend static files (must be after API routes) ----
 
+class _HashedAssets(StaticFiles):
+    """Vite's /assets/* names carry a content hash: cache them for a year."""
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        if resp.status_code == 200:
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
+if os.path.isdir(os.path.join(STATIC_DIR, "assets")):
+    app.mount("/assets", _HashedAssets(directory=os.path.join(STATIC_DIR, "assets")),
+              name="assets")
+
 if os.path.isdir(STATIC_DIR):
 
-    @app.get("/{path:path}")
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"])   # HEAD: uptime monitors
     async def serve_spa(path: str):
         """Serve frontend static files; fall back to index.html for SPA routing."""
         # Resolve the requested path and prevent directory traversal.
@@ -373,17 +519,14 @@ if os.path.isdir(STATIC_DIR):
         resolved = os.path.realpath(os.path.abspath(os.path.join(STATIC_DIR, path)))
         if not resolved.startswith(STATIC_DIR + os.sep) and resolved != STATIC_DIR:
             raise HTTPException(status_code=404)  # traversal attempt — refuse
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404)   # unknown API route: no SPA page
         if path and os.path.isfile(resolved):
             return FileResponse(resolved)
-        # index.html must never be cached: it carries the app.js/app.css version
-        # query strings — a stale copy keeps old JS in the browser forever.
+        # index.html must never be cached: it names the current hashed bundles —
+        # a stale copy keeps old JS in the browser.
         return FileResponse(os.path.join(STATIC_DIR, "index.html"),
                             headers={"Cache-Control": "no-cache"})
-
-    # Mount assets directly for proper caching headers
-    assets_dir = os.path.join(STATIC_DIR, "assets")
-    if os.path.isdir(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
 
 if __name__ == "__main__":

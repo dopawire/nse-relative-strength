@@ -27,11 +27,11 @@ import sys
 import requests
 
 import watchlist
-from rs_engine.config import CACHE_DIR
+from rs_engine.config import CACHE_DIR, data_path
 from rs_engine.decide import crore
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-RS_DATA = os.path.join(HERE, "rs_data.json")
+RS_DATA = data_path("rs_data.json")
 SENT = os.path.join(CACHE_DIR, ".brief_sent")
 SITE = os.environ.get("NSE_RS_SITE", "https://dopawire.github.io/nse-relative-strength/")
 API = "https://api.telegram.org/bot{token}/{method}"

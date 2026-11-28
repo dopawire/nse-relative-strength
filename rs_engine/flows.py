@@ -21,9 +21,11 @@ import datetime as dt
 import os
 import re
 
+from rs_engine.config import data_path
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MONTHLY = os.path.join(ROOT, "nse_fii_dii_monthly.csv")
-DAILY = os.path.join(ROOT, "nse_fii_dii_daily.csv")
+MONTHLY = data_path("nse_fii_dii_monthly.csv")
+DAILY = data_path("nse_fii_dii_daily.csv")
 
 KOTAK_URL = "https://www.kotakneo.com/share-market-today/fii-dii-data/"
 NSE_URL = "https://www.nseindia.com/api/fiidiiTradeReact"

@@ -1,0 +1,15 @@
+# HTTPS reverse proxy.  SITE_ADDRESS = your domain (e.g. rs.example.com):
+# Caddy gets and renews a Let's Encrypt certificate by itself.  ":80" serves
+# plain HTTP for a first test (set NSE_RS_COOKIE_SECURE=0 then).
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+	reverse_proxy web:8000
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	log {
+		output stdout
+		format console
+	}
+}

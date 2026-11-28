@@ -13,6 +13,9 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 . ./find_python.sh
 
+# log file (Docker: on the data volume)
+LOG="${NSE_RS_LOG:-run.log}"
+
 # exported (set -a): send_brief.py reads the Telegram settings too
 if [ -f "$HOME/.config/nse-rs/notify.env" ]; then
     set -a; . "$HOME/.config/nse-rs/notify.env"; set +a
@@ -30,35 +33,35 @@ if [ "${1:-}" = "--if-stale" ]; then
         # often after the build: pick it up on the hourly retries
         out="$(timeout 120 "$PY" refresh_flows.py --if-behind --patch 2>&1)"
         if printf '%s' "$out" | grep -q "rs_data.json updated"; then
-            printf '[%s] FII/DII caught up\n%s\n' "$(date '+%F %T')" "$out" >> run.log
+            printf '[%s] FII/DII caught up\n%s\n' "$(date '+%F %T')" "$out" >> "$LOG"
             if [ "${PUBLISH_SITE:-0}" = "1" ]; then
-                /bin/bash publish_site.sh >> run.log 2>&1 \
-                    && echo "[$(date '+%F %T')] site published" >> run.log
+                /bin/bash publish_site.sh >> "$LOG" 2>&1 \
+                    && echo "[$(date '+%F %T')] site published" >> "$LOG"
             fi
         fi
-        echo "[$(date '+%F %T')] cron retry: data already current — skipping" >> run.log
+        echo "[$(date '+%F %T')] cron retry: data already current — skipping" >> "$LOG"
         exit 0
     fi
-    echo "[$(date '+%F %T')] cron retry: data stale — rebuilding" >> run.log
+    echo "[$(date '+%F %T')] cron retry: data stale — rebuilding" >> "$LOG"
 fi
 
 # pick up new NSE listings first (best effort: geo-blocked / no Playwright →
 # they're still added unclassified so the New Listings tab shows them)
-echo "[$(date '+%F %T')] refresh_classification.py" >> run.log
-timeout 900 "$PY" refresh_classification.py >> run.log 2>&1 \
-    || echo "[$(date '+%F %T')] listing refresh failed (rc=$?) — continuing" >> run.log
+echo "[$(date '+%F %T')] refresh_classification.py" >> "$LOG"
+timeout 900 "$PY" refresh_classification.py >> "$LOG" 2>&1 \
+    || echo "[$(date '+%F %T')] listing refresh failed (rc=$?) — continuing" >> "$LOG"
 
 # upcoming results / corporate events (best effort)
-timeout 120 "$PY" refresh_events.py >> run.log 2>&1 || true
+timeout 120 "$PY" refresh_events.py >> "$LOG" 2>&1 || true
 
 # FII / DII cash flows (best effort: the files keep their history on failure)
-echo "[$(date '+%F %T')] refresh_flows.py" >> run.log
-timeout 120 "$PY" refresh_flows.py >> run.log 2>&1 \
-    || echo "[$(date '+%F %T')] FII/DII refresh failed (rc=$?) — continuing" >> run.log
+echo "[$(date '+%F %T')] refresh_flows.py" >> "$LOG"
+timeout 120 "$PY" refresh_flows.py >> "$LOG" 2>&1 \
+    || echo "[$(date '+%F %T')] FII/DII refresh failed (rc=$?) — continuing" >> "$LOG"
 
 bash run_daily.sh
 build_rc=$?
-"$PY" audit_data.py >> run.log 2>&1
+"$PY" audit_data.py >> "$LOG" 2>&1
 audit_rc=$?
 
 if [ $build_rc -ne 0 ] || [ $audit_rc -ne 0 ]; then
@@ -71,12 +74,12 @@ fi
 
 # evening brief + watchlist alerts → Telegram (no-op without a bot token;
 # once per session)
-"$PY" send_brief.py >> run.log 2>&1 || notify "⚠️ nse-rs brief failed — see run.log"
+"$PY" send_brief.py >> "$LOG" 2>&1 || notify "⚠️ nse-rs brief failed — see run.log"
 
 # optional: publish the snapshot to the public site (PUBLISH_SITE=1)
 if [ "${PUBLISH_SITE:-0}" = "1" ]; then
-    if /bin/bash publish_site.sh >> run.log 2>&1; then
-        echo "[$(date '+%F %T')] site published" >> run.log
+    if /bin/bash publish_site.sh >> "$LOG" 2>&1; then
+        echo "[$(date '+%F %T')] site published" >> "$LOG"
     else
         notify "⚠️ nse-rs site publish failed — see run.log"
     fi

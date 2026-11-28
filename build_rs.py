@@ -47,7 +47,7 @@ from collections import defaultdict, Counter
 import requests
 
 # ---- rs_engine: computation core (re-exported here for compatibility) ----
-from rs_engine.config import (CACHE_DIR, WINDOW, FULL_RANGE,
+from rs_engine.config import (CACHE_DIR, data_path, WINDOW, FULL_RANGE,
                               APPEND_RANGE, MIN_BARS, EMA_PERIODS, BENCHMARK_NAME, BENCH_YSYM,
                               YH_WORKERS, IST, is_holiday, latest_session, standard_name,
                               standard_company)
@@ -70,9 +70,9 @@ from rs_engine.snapshot import (load_previous_snapshot, seed_from_rs_data,
 from rs_engine.report import write_daily_report
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MASTER_CSV   = os.path.join(HERE, "nse_stock_master.csv")   # NSE 4-level universe
-SYMBOL_CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")  # old,new,isin,date
-CAP_CLASSES  = os.path.join(HERE, "nse_cap_classes.csv")       # symbol,cap (Large/Mid/Small)
+MASTER_CSV   = data_path("nse_stock_master.csv")   # NSE 4-level universe
+SYMBOL_CHANGES = data_path("nse_symbol_changes.csv")  # old,new,isin,date
+CAP_CLASSES  = data_path("nse_cap_classes.csv")       # symbol,cap (Large/Mid/Small)
 NO_CAP_SESSIONS = 20       # not in a size index and < 1 month of trading: no class yet
 
 # Cache file locations (CACHE_DIR itself lives in rs_engine.config).
@@ -85,7 +85,7 @@ OFFICIAL_FILLS = os.path.join(CACHE_DIR, ".nse_official_fills.json")
 # {sym: {date: [close, high, low, ref_date, ref_official_close]}} — bars filled
 # from the NSE bhavcopy, re-scaled to Yahoo's adjusted series every run
 BUILD_LOCK   = os.path.join(CACHE_DIR, ".build.lock")
-RS_DATA_JSON = os.path.join(HERE, "rs_data.json")
+RS_DATA_JSON = data_path("rs_data.json")
 
 
 def migrate_legacy_caches():
@@ -1335,9 +1335,9 @@ def main():
     save_rs_json(levels, breadth, meta, RS_DATA_JSON, rotation, build_flows(),
                  post=add_decisions)
     print(f"Wrote {RS_DATA_JSON}")
-    write_daily_report(os.path.join(HERE, "daily_report.html"),
+    write_daily_report(data_path("daily_report.html"),
                        meta, breadth, levels, ipo)
-    print(f"Wrote {os.path.join(HERE, 'daily_report.html')}")
+    print(f"Wrote {data_path('daily_report.html')}")
 
 
 if __name__ == "__main__":

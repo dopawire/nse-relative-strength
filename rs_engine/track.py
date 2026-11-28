@@ -16,10 +16,10 @@ import json
 import os
 from statistics import mean
 
-from rs_engine.config import CORP_ACTION_JUMP
+from rs_engine.config import CORP_ACTION_JUMP, data_path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PICKS = os.path.join(ROOT, "nse_picks.jsonl")
+PICKS = data_path("nse_picks.jsonl")
 HORIZONS = (5, 10, 20)
 N_BREAKOUTS, N_PULLBACKS, N_IPOS, N_WEEKLY, N_HTF = 25, 15, 15, 25, 15
 

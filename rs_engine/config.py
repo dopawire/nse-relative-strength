@@ -16,6 +16,16 @@ CACHE_DIR = os.environ.get("NSE_RS_CACHE_DIR") or os.path.join(
     os.path.expanduser("~"), ".cache", "nse-rs")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# Data files the pipeline reads and rewrites (the nse_*.csv tables,
+# rs_data.json, the pick log): next to the code by default; NSE_RS_DATA_DIR
+# moves them elsewhere (Docker: a persistent volume, seeded from the repo).
+DATA_DIR = os.environ.get("NSE_RS_DATA_DIR") or HERE
+
+
+def data_path(name):
+    """Absolute path of a data file in DATA_DIR."""
+    return os.path.join(DATA_DIR, name)
+
 
 def _load_overrides():
     try:
@@ -52,7 +62,7 @@ BENCH_YSYM = str(cfg("bench_symbol", "^CRSLDX"))
 YH_WORKERS = int(cfg("yahoo_workers", 8))
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))   # NSE trading day
 
-HOLIDAYS_CSV = os.path.join(HERE, "nse_holidays.csv")
+HOLIDAYS_CSV = os.path.join(DATA_DIR, "nse_holidays.csv")
 _holidays_cache = None
 
 

@@ -40,18 +40,18 @@ import datetime as dt
 
 import requests
 
-from rs_engine.config import CURRENT_MACROS, CACHE_DIR, standard_name, standard_company
+from rs_engine.config import CURRENT_MACROS, CACHE_DIR, data_path, standard_name, standard_company
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MASTER = os.path.join(HERE, "nse_stock_master.csv")
-CHANGES = os.path.join(HERE, "nse_symbol_changes.csv")   # old,new,isin,date
-DELISTED = os.path.join(HERE, "nse_delisted.csv")        # archived master rows
-HOLIDAYS = os.path.join(HERE, "nse_holidays.csv")
+MASTER = data_path("nse_stock_master.csv")
+CHANGES = data_path("nse_symbol_changes.csv")   # old,new,isin,date
+DELISTED = data_path("nse_delisted.csv")        # archived master rows
+HOLIDAYS = data_path("nse_holidays.csv")
 PRICE_CACHE = os.path.join(CACHE_DIR, ".yh_price_cache.json")   # written by build_rs.py
 STALE_SESSIONS = 5   # no price for this many sessions = stopped trading
-OVERRIDES = os.path.join(HERE, "nse_classification_overrides.csv")  # hand-checked fixes
+OVERRIDES = data_path("nse_classification_overrides.csv")  # hand-checked fixes
 LEVEL_FIELDS = ["macro", "sector", "industry", "basicIndustry"]
-CAP_CLASSES = os.path.join(HERE, "nse_cap_classes.csv")   # symbol,cap
+CAP_CLASSES = data_path("nse_cap_classes.csv")   # symbol,cap
 # SEBI/AMFI size classes by full market-cap rank, as NSE's indices track
 # them: top 100 = large, next 150 = mid, next 250 = small (rest: micro).
 CAP_INDEX_LISTS = [

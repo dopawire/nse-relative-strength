@@ -1,0 +1,44 @@
+# Production stack: Caddy (HTTPS) → web (FastAPI + React) ; worker runs the
+# daily pipeline on the shared data volumes.  Copy .env.example to .env first.
+#   docker compose up -d --build
+#   docker compose exec web python -m backend.users add YOU --admin
+name: nse-rs
+
+services:
+  web:
+    build: { context: ., target: web }
+    image: nse-rs:web
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - data:/data
+      - cache:/cache
+    expose: ["8000"]
+
+  worker:
+    build: { context: ., target: worker }
+    image: nse-rs:worker
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - data:/data
+      - cache:/cache
+    shm_size: "512m"          # Chromium (NSE listing refresh)
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    restart: unless-stopped
+    depends_on: [web]
+    ports: ["80:80", "443:443"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  data:
+  cache:
+  caddy_data:
+  caddy_config:

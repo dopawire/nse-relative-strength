@@ -12,8 +12,10 @@ import csv
 import datetime as dt
 import os
 
+from rs_engine.config import data_path
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IPOS = os.path.join(ROOT, "nse_ipos.csv")
+IPOS = data_path("nse_ipos.csv")
 NSE_URL = "https://www.nseindia.com/api/public-past-issues"
 
 

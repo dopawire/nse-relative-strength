@@ -16,7 +16,7 @@ pytestmark = pytest.mark.skipif(
 def client():
     from fastapi.testclient import TestClient
     import backend.main as m
-    with TestClient(m.app) as c:
+    with TestClient(m.app, headers={"X-NSE-RS": "1"}) as c:
         yield c
 
 
@@ -157,3 +157,14 @@ def test_watchlist_roundtrip(client, tmp_path, monkeypatch):
     assert r.json() == {"symbols": ["TCS", "INFY"]}
     assert client.get("/api/watchlist").json() == {"symbols": ["TCS", "INFY"]}
     assert client.put("/api/watchlist", json={"symbols": ["X"] * 501}).status_code == 400
+
+
+def test_level_groups_carry_their_delta(client):
+    """The ranking table's Δ column: the API must pass each group's change
+    since the previous build through (it once dropped it)."""
+    import json
+    raw = json.load(open(ROOT / "rs_data.json"))["levels"][0]
+    api = client.get(f"/api/levels/{raw['key']}").json()
+    want = {g["id"]: g.get("dp") for g in raw["groups"]}
+    assert {g["id"]: g.get("dp") for g in api["groups"]} == want
+    assert any(v is not None for v in want.values())

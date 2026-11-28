@@ -1,6 +1,6 @@
 [project]
 name = "nse-relative-strength"
-version = "1.0.0"
+version = "2.0.0"
 description = "NSE Relative-Strength dashboard: equal-weight RS rankings, market breadth, rotation view"
 readme = "README.md"
 license = { file = "LICENSE" }

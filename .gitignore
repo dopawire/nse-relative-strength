@@ -20,3 +20,11 @@ run.log
 .DS_Store
 .build.lock
 .coverage
+
+# React app: built by `npm run build` (frontend/) — Docker and CI build it
+frontend/dist/
+frontend/node_modules/
+# login data (Docker keeps these on the data volume)
+users.json
+.secret_key
+frontend/*.tsbuildinfo

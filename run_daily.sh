@@ -16,4 +16,4 @@ ts() { date "+%Y-%m-%d %H:%M:%S %Z"; }
   else
     echo "[$(ts)] FAILED (exit $rc)"
   fi
-} >> run.log 2>&1
+} >> "${NSE_RS_LOG:-run.log}" 2>&1

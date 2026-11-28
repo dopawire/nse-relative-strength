@@ -8,10 +8,17 @@ with a McClellan-style **Market Breadth** oscillator.
 No API keys, no paid subscriptions.  Released under the [MIT License](LICENSE) —
 free to use, modify and share.
 
+**Version 2** is a private web app: a React + TypeScript frontend behind a
+login, a FastAPI backend, and a Docker stack (web, scheduled pipeline worker,
+Caddy for HTTPS) that runs on any Linux server — see **[DEPLOY.md](DEPLOY.md)**
+for putting it on a VPS in India.  Pages: Overview · Focus · Swing setups ·
+Relative-strength rankings · New listings · Breadth · Rotation · FII / DII ·
+Scans, with a stock search (`/`) and an RS-line chart for every stock.
+
 ## What it produces
 
-A website (FastAPI backend + vanilla JS frontend, served on `localhost:8000`)
-with:
+A website (FastAPI backend + React frontend in `frontend/`, served on
+`localhost:8000` or behind Caddy in Docker) with:
 - Four tabs (Macro / Sector / Industry / Basic Industry), each an equal-weight
   RS ranking of its groups; expand any group to see its constituent stocks.
 - Per-stock: RS sparkline, `RS_STS%`, LTP, EMA20/50/100/150/200 flags, the
@@ -285,7 +292,11 @@ Optional free Telegram failure alerts: create a bot via @BotFather, then put
 (set `TELEGRAM_NOTIFY_OK=1` for success pings too).  CI runs the test suite on
 every push via GitHub Actions (`.github/workflows/ci.yml`).
 
-### Public site (free, for everyone)
+### Public site (legacy, read-only snapshot)
+
+> Version 2 is private (login).  The GitHub Pages snapshot below still serves
+> the pre-2.0 app from `frontend/legacy/`; turn it off for a private setup
+> (see DEPLOY.md → Security notes).
 
 `bash publish_site.sh` commits the current `rs_data.json` snapshot (plus the
 stock master, which the cloud fallback build reads) and pushes —
@@ -311,8 +322,9 @@ python3 refresh_classification.py --stubs-only  # add new listings unclassified
 
 ```
 PY=~/.venvs/nse-rs/bin/python
-$PY -m pytest tests/ -q          # all (89)
-$PY -m pytest tests/ -q -m smoke # frontend smoke only
+$PY -m pytest tests/ -q          # all
+$PY -m pytest tests/ -q -m smoke # browser smoke tests (needs frontend/dist: cd frontend && npm run build)
+(cd frontend && npm test)        # frontend unit tests (vitest)
 NO_BROWSER=1 $PY -m pytest tests/ -q   # skip browser tests
 $PY -m ruff check .              # lint (also runs in CI)
 $PY audit_data.py                # daily data health check
@@ -322,8 +334,10 @@ Covers the benchmark gap-fill fallback chain (Yahoo index gaps → Investing.com
 scrape → synthetic equal-weight), Yahoo null-OHLC handling, the intraday/bhavcopy
 repair chain, RS maths, the RS-vs-EMA21 flag, the NSE holiday calendar, and
 integrity of the generated artifacts (RS window alignment, market-breadth
-continuity, window-coverage consistency).  Frontend smoke tests boot the real
-server and load the page in headless Chromium.
+continuity, window-coverage consistency), login / sessions / roles / CSRF,
+and the worker's timetable.  Browser smoke tests boot the real server with
+login on and drive the built React app in headless Chromium (every page,
+filters, exports, charts, phone layout).
 
 ## Setup (first time)
 
@@ -356,6 +370,15 @@ driver) cannot run.  The shell scripts pick the interpreter via
   or a non-standard spelling reaches the master.
 - `nse_fii_dii_monthly.csv` / `nse_fii_dii_daily.csv` — FII / DII cash
   flows (buy, sell, net in ₹ crore), maintained by `refresh_flows.py`.
+- `NSE_RS_DATA_DIR` — where those data files (and `rs_data.json`, the pick
+  log, `users.json`) live: next to the code by default, `/data` (a volume) in
+  Docker.  `NSE_RS_CACHE_DIR` moves the price caches (`~/.cache/nse-rs`).
+- `backend/` — FastAPI app (`main.py`), login (`auth.py`), user admin
+  (`python -m backend.users add|passwd|remove|list`).
+- `frontend/` — the React app (`npm run dev` / `npm run build` → `frontend/dist`);
+  `frontend/legacy/` — the pre-2.0 single-file app (GitHub Pages snapshot).
+- `deploy/` — Docker entrypoint, worker scheduler, Caddyfile; `Dockerfile`,
+  `docker-compose.yml`, `.env.example` at the root.
 - `rs_engine/` — computation core (config, RS maths, breadth, rotation,
   FII/DII flows, snapshots, digest); `build_rs.py` holds the data layer
   (caches, Yahoo/bhavcopy fetchers, gap-fills) and the CLI.
